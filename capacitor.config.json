@@ -1,0 +1,8 @@
+{
+  "appId": "in.pasteltreats.app",
+  "appName": "Pastel Treats",
+  "webDir": "dist",
+  "backgroundColor": "#a1d7c2",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "always" }
+}

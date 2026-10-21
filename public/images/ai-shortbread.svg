@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff3c9"/><stop offset="1" stop-color="#ffdac1"/></linearGradient>
+<radialGradient id="shine" cx=".35" cy=".3" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+
+</defs>
+<rect width="800" height="800" fill="url(#bg)"/>
+<circle cx="660" cy="130" r="150" fill="#fff" opacity=".35"/>
+<circle cx="110" cy="690" r="120" fill="#fff" opacity=".25"/>
+<circle cx="120" cy="140" r="16" fill="#ffec9d"/><circle cx="160" cy="110" r="10" fill="#ffdac1"/><circle cx="690" cy="640" r="12" fill="#a1d7c2"/>
+<ellipse cx="400" cy="618" rx="290" ry="58" fill="#20543f" opacity=".12" filter="url(#soft)"/><ellipse cx="400" cy="600" rx="290" ry="58" fill="#fff"/><ellipse cx="400" cy="594" rx="250" ry="44" fill="#f6f1e8"/><g transform="rotate(-8 260 470)"><rect x="200" y="450" width="120" height="60" rx="8" fill="#f0d39a"/><rect x="200" y="420" width="120" height="34" rx="6" fill="#d38b3c"/><rect x="198" y="390" width="124" height="34" rx="10" fill="#5a3e36"/><path d="M210 400 q25 -10 50 0 t50 0" stroke="#7a5446" stroke-width="5" fill="none"/></g><g transform="rotate(0 400 490)"><rect x="340" y="470" width="120" height="60" rx="8" fill="#f0d39a"/><rect x="340" y="440" width="120" height="34" rx="6" fill="#d38b3c"/><rect x="338" y="410" width="124" height="34" rx="10" fill="#5a3e36"/><path d="M350 420 q25 -10 50 0 t50 0" stroke="#7a5446" stroke-width="5" fill="none"/></g><g transform="rotate(8 540 470)"><rect x="480" y="450" width="120" height="60" rx="8" fill="#f0d39a"/><rect x="480" y="420" width="120" height="34" rx="6" fill="#d38b3c"/><rect x="478" y="390" width="124" height="34" rx="10" fill="#5a3e36"/><path d="M490 400 q25 -10 50 0 t50 0" stroke="#7a5446" stroke-width="5" fill="none"/></g>
+</svg>
