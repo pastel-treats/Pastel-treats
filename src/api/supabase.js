@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 export function createLiveApi(url, key) {
-  const sb = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } })
+  const sb = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' } })
   const must = ({ data, error }) => {
     if (error) throw new Error(error.message)
     return data
@@ -71,6 +71,10 @@ export function createLiveApi(url, key) {
     async signIn(email, password) { must(await sb.auth.signInWithPassword({ email, password })) },
     async signUp(email, password) { must(await sb.auth.signUp({ email, password })) },
     async adminSignOut() { await sb.auth.signOut() },
+    // "Forgot password?" → e-mail with a link back to this site (?pt-reset=1 opens the new-password page)
+    async resetPassword(email) { must(await sb.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?pt-reset=1` })) },
+    async recoveryReady() { const { data } = await sb.auth.getSession(); return !!data.session },
+    async updatePassword(password) { must(await sb.auth.updateUser({ password })) },
     async adminState() {
       const { data } = await sb.auth.getUser()
       if (!data.user) return { user: null, isAdmin: false }

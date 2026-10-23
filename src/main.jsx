@@ -5,6 +5,9 @@ import App from './App.jsx'
 import { StoreProvider } from './store.jsx'
 import './styles.css'
 
+// Password reset e-mail link → open the "set a new password" page (the code in the URL is read by the database client)
+if (new URLSearchParams(location.search).has('pt-reset') && !location.hash.startsWith('#/admin/reset')) location.hash = '#/admin/reset'
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <HashRouter>

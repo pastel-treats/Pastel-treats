@@ -132,25 +132,36 @@ ok('20c anon cannot change orders', still === 'payment_verification', eW || '')
 
 // admin flow
 const ADMIN = '11111111-1111-1111-1111-111111111111'
-const claimed = (await asUser(ADMIN, { email: 'baker@x.com' }, 'select claim_first_admin() r')).rows[0].r
-const claimed2 = (await asUser('22222222-2222-2222-2222-222222222222', { email: 'evil@x.com' }, 'select claim_first_admin() r')).rows[0].r
-ok('admin bootstrap only once', claimed === true && claimed2 === false)
+const AC = { email: 'pasteltreatsdgl@gmail.com' }
+const claimedEvil = (await asUser('22222222-2222-2222-2222-222222222222', { email: 'evil@x.com' }, 'select claim_first_admin() r')).rows[0].r
+const claimed = (await asUser(ADMIN, AC, 'select claim_first_admin() r')).rows[0].r
+const claimed2 = (await asUser(ADMIN, AC, 'select claim_first_admin() r')).rows[0].r
+ok('admin bootstrap only once, only the bakery e-mail', claimed === true && claimed2 === false && claimedEvil === false)
+{
+  // even if someone else is put in the admins table, a different e-mail gets no access
+  await db.exec(`insert into admins(user_id, email, role) values ('33333333-3333-3333-3333-333333333333', 'other@x.com', 'owner')`)
+  const seen = (await asUser('33333333-3333-3333-3333-333333333333', { email: 'other@x.com' }, 'select count(*)::int n from orders')).rows[0].n
+  const isAdm = (await asUser('33333333-3333-3333-3333-333333333333', { email: 'other@x.com' }, 'select is_admin() r')).rows[0].r
+  const bakerSees = (await asUser(ADMIN, AC, 'select count(*)::int n from orders')).rows[0].n
+  ok('only pasteltreatsdgl@gmail.com can see orders', seen === 0 && isAdm === false && bakerSees > 0, `other=${seen}, baker=${bakerSees}`)
+  await db.exec(`delete from admins where user_id = '33333333-3333-3333-3333-333333333333'`)
+}
 const evilRead = (await asUser('22222222-2222-2222-2222-222222222222', {}, 'select count(*)::int n from orders')).rows[0].n
 ok('20d non-admin signed-in user sees no orders', evilRead === 0)
 
 const oid = (await db.query('select id from orders where order_number=$1', [o1.order_number])).rows[0].id
-await asUser(ADMIN, {}, `update payments set status='verified' where order_id=$1`, [oid])
+await asUser(ADMIN, AC, `update payments set status='verified' where order_id=$1`, [oid])
 let ord = (await db.query('select * from orders where id=$1', [oid])).rows[0]
 ok('15 verified advance updates balance', ord.amount_paid === 1050 && ord.payment_status === 'advance_received' && ord.status === 'advance_received', `${ord.amount_paid} ${ord.payment_status} ${ord.status}`)
-await asUser(ADMIN, {}, `update orders set status='confirmed' where id=$1`, [oid], `select set_config('app.status_note','Confirmed by baker',false);`)
+await asUser(ADMIN, AC, `update orders set status='confirmed' where id=$1`, [oid], `select set_config('app.status_note','Confirmed by baker',false);`)
 const hist = (await db.query('select to_status, note, actor from order_status_history where order_id=$1 order by id', [oid])).rows
 ok('status history recorded with actor', hist.at(-1).to_status === 'confirmed' && hist.at(-1).actor === ADMIN)
-await asUser(ADMIN, {}, `insert into payments(order_id, kind, method, amount, status) values ($1,'balance','cash',1050,'verified')`, [oid])
+await asUser(ADMIN, AC, `insert into payments(order_id, kind, method, amount, status) values ($1,'balance','cash',1050,'verified')`, [oid])
 ord = (await db.query('select * from orders where id=$1', [oid])).rows[0]
 ok('15b cash balance → fully paid', ord.payment_status === 'fully_paid' && ord.amount_paid === 2100)
 
 // 13/14. price change preserves history
-await asUser(ADMIN, {}, `update products set flavours = '[{"name":"Red velvet","price":1900}]' where id=$1`, [prod.id])
+await asUser(ADMIN, AC, `update products set flavours = '[{"name":"Red velvet","price":1900}]' where id=$1`, [prod.id])
 ord = (await db.query('select items from orders where id=$1', [oid])).rows[0]
 ok('14 historic order keeps agreed price', ord.items[0].weight_price === 1700)
 const audit = (await db.query(`select count(*)::int n from audit_logs where entity='products' and actor=$1`, [ADMIN])).rows[0].n

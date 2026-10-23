@@ -30,24 +30,31 @@ create table if not exists public.admins (
   created_at timestamptz not null default now()
 );
 
+-- Only ONE e-mail may ever use the baker's dashboard. Change it here if the bakery e-mail changes.
+create or replace function public.admin_email()
+returns text language sql immutable as $$ select 'pasteltreatsdgl@gmail.com'::text $$;
+
 create or replace function public.is_admin()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.admins where user_id = auth.uid())
+     and lower(coalesce(auth.jwt() ->> 'email', '')) = public.admin_email()
 $$;
 
 create or replace function public.admin_role()
 returns text language sql stable security definer set search_path = public as $$
-  select role from public.admins where user_id = auth.uid()
+  select role from public.admins
+   where user_id = auth.uid() and lower(coalesce(auth.jwt() ->> 'email', '')) = public.admin_email()
 $$;
 
--- The very first signed-in user can claim ownership ONCE (when no admin exists yet).
+-- Only the bakery e-mail can claim the owner role (and only if it isn't already set up).
 create or replace function public.claim_first_admin()
 returns boolean language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is null then raise exception 'Please sign in first'; end if;
-  if exists (select 1 from public.admins) then return false; end if;
-  insert into public.admins(user_id, email, role)
-  values (auth.uid(), coalesce(auth.jwt() ->> 'email', ''), 'owner');
+  if lower(coalesce(auth.jwt() ->> 'email', '')) <> public.admin_email() then return false; end if;
+  if exists (select 1 from public.admins where lower(email) = public.admin_email()) then return false; end if;
+  insert into public.admins(user_id, email, role) values (auth.uid(), public.admin_email(), 'owner')
+    on conflict (user_id) do update set role = 'owner', email = excluded.email;
   return true;
 end $$;
 

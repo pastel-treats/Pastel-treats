@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { NavLink, Route, Routes, Link, useLocation } from 'react-router-dom'
+import { NavLink, Route, Routes, Link, useLocation, useNavigate } from 'react-router-dom'
 import { api, isDemo } from '../api/index.js'
 import { DEMO_ADMIN_PASSWORD } from '../api/demo.js'
 import { useStore } from '../store.jsx'
 import { cleanError } from '../lib/format.js'
+import { isAdminEmail, savedAdminEmail, rememberAdminEmail } from '../lib/admin.js'
 import { Icon, Spinner, Field } from '../components/ui.jsx'
 import Overview from './Overview.jsx'
 import Orders from './Orders.jsx'
@@ -45,29 +46,99 @@ function AdminData({ children, me }) {
 
 function Login({ onDone }) {
   const { toast } = useStore()
-  const [mode, setMode] = useState('in')
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(() => savedAdminEmail())
   const [pw, setPw] = useState('')
+  const [show, setShow] = useState(false)
+  const [remember, setRemember] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [forgot, setForgot] = useState(false)
+  const [sent, setSent] = useState(false)
+  const wrongEmail = !isDemo && email.includes('@') && !isAdminEmail(email)
+
   async function go(e) {
-    e.preventDefault(); setBusy(true)
+    e.preventDefault()
+    if (wrongEmail) return toast('This dashboard is only for the Pastel Treats account', true)
+    setBusy(true)
     try {
-      if (mode === 'in') await api.signIn(email, pw)
-      else { await api.signUp(email, pw); toast('Account created. If e-mail confirmation is on, confirm it, then sign in.') }
-      onDone()
+      if (forgot) { await api.resetPassword(email.trim()); setSent(true) }
+      else {
+        await api.signIn(email.trim(), pw)
+        rememberAdminEmail(email.trim(), remember)
+        onDone()
+      }
     } catch (err) { toast(cleanError(err), true) } finally { setBusy(false) }
   }
   return (
     <div style={{ minHeight: '100vh', background: 'var(--mint)', padding: 16 }}>
-      <form className="card stack login-card" onSubmit={go}>
+      <form className="card stack login-card" onSubmit={go} autoComplete="on">
         <img src="logo-mint.svg" alt="Pastel Treats" style={{ borderRadius: 14 }} />
-        <h2 className="center">Baker’s dashboard</h2>
+        <h2 className="center">{forgot ? 'Reset your password' : 'Baker’s dashboard'}</h2>
         {isDemo && <div className="notice warn small">Demo mode: use any e-mail and the password <b>{DEMO_ADMIN_PASSWORD}</b>.</div>}
-        <Field label="E-mail"><input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" /></Field>
-        <Field label="Password"><input className="input" type="password" required minLength={6} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} /></Field>
-        <button className="btn btn-primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : 'Create account'}</button>
-        {!isDemo && <button type="button" className="link-btn small" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>{mode === 'in' ? 'First time? Create the owner account' : 'Have an account? Sign in'}</button>}
-        <Link to="/" className="small center">← Back to the shop</Link>
+        {sent ? (
+          <div className="notice info small"><Icon name="check" size={18} /><div>
+            <b>Check {email} for a reset link.</b> Open it <b>on this same phone and browser</b>. It can take a few minutes and may land in Spam/Promotions.
+          </div></div>
+        ) : <>
+          <Field label="E-mail" error={wrongEmail ? 'Only the Pastel Treats account can sign in here' : null}>
+            <input className={'input' + (wrongEmail ? ' err' : '')} type="email" name="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" inputMode="email" />
+          </Field>
+          {!forgot && (
+            <Field label="Password">
+              <div className="pw-wrap">
+                <input className="input" type={show ? 'text' : 'password'} name="password" required minLength={6} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
+                <button type="button" className="link-btn small" onClick={() => setShow((v) => !v)}>{show ? 'Hide' : 'Show'}</button>
+              </div>
+            </Field>
+          )}
+          {!forgot && <label className="check small"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember my e-mail on this device</label>}
+          <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Please wait…' : forgot ? 'Send reset link' : 'Sign in'}</button>
+          {!forgot && <p className="tiny muted center" style={{ margin: 0 }}>Tip: when your phone offers to <b>save the password</b>, tap Save — next time it fills in by itself.</p>}
+        </>}
+        <div className="row between wrap" style={{ marginTop: 4 }}>
+          <button type="button" className="link-btn small" onClick={() => { setForgot((v) => !v); setSent(false) }}>{forgot ? '← Back to sign in' : 'Forgot password?'}</button>
+          <Link to="/" className="small">Back to the shop</Link>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+// Opened from the reset e-mail: set a new password
+function ResetPassword() {
+  const { toast } = useStore()
+  const nav = useNavigate()
+  const [ready, setReady] = useState(undefined)
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.recoveryReady().then(setReady).catch(() => setReady(false)) }, [])
+  async function save(e) {
+    e.preventDefault()
+    if (pw.length < 8) return toast('Use at least 8 characters', true)
+    if (pw !== pw2) return toast('The two passwords don’t match', true)
+    setBusy(true)
+    try {
+      await api.updatePassword(pw)
+      toast('Password changed — you’re signed in')
+      try { history.replaceState(null, '', location.pathname + '#/admin') } catch { /* */ }
+      nav('/admin', { replace: true }); location.reload()
+    } catch (err) { toast(cleanError(err), true) } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--mint)', padding: 16 }}>
+      <form className="card stack login-card" onSubmit={save}>
+        <img src="logo-mint.svg" alt="Pastel Treats" style={{ borderRadius: 14 }} />
+        <h2 className="center">Set a new password</h2>
+        {ready === undefined ? <Spinner /> : !ready ? (
+          <>
+            <div className="notice warn small"><Icon name="sparkle" size={18} /><div>This reset link has expired or was opened in a different browser. Please ask for a new one and open it on the same phone.</div></div>
+            <Link to="/admin" className="btn btn-primary btn-block">Back to sign in</Link>
+          </>
+        ) : <>
+          <Field label="New password" hint="at least 8 characters"><input className="input" type="password" name="new-password" autoComplete="new-password" required value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+          <Field label="Type it again"><input className="input" type="password" autoComplete="new-password" required value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>
+          <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Saving…' : 'Save new password'}</button>
+        </>}
       </form>
     </div>
   )
@@ -75,14 +146,16 @@ function Login({ onDone }) {
 
 function NotAdmin({ me, onDone }) {
   const { toast } = useStore()
+  const canClaim = isDemo || isAdminEmail(me.user.email)
   return (
     <div style={{ minHeight: '100vh', background: 'var(--mint)', padding: 16 }}>
       <div className="card stack login-card">
-        <h2>Almost there</h2>
-        <p className="small">You’re signed in as <b>{me.user.email}</b> but this account isn’t a bakery admin yet.</p>
-        <p className="small muted">If this is the very first setup, claim the owner role (works only once). Otherwise ask the owner to add you under Team, quoting this ID:</p>
-        <div className="copy">{me.user.id}</div>
-        <button className="btn btn-primary" onClick={async () => { try { const ok = await api.claimFirstAdmin(); if (ok) { toast('You are now the owner'); onDone() } else toast('An owner already exists — ask them to add you', true) } catch (e) { toast(cleanError(e), true) } }}>Claim owner role</button>
+        <h2>{canClaim ? 'Almost there' : 'No access'}</h2>
+        <p className="small">You’re signed in as <b>{me.user.email}</b>.</p>
+        {canClaim ? <>
+          <p className="small muted">Tap below once to set this account up as the bakery owner.</p>
+          <button className="btn btn-primary" onClick={async () => { try { const ok = await api.claimFirstAdmin(); if (ok) { toast('You are now the owner'); onDone() } else toast('Could not set up the owner — please contact support', true) } catch (e) { toast(cleanError(e), true) } }}>Set up owner access</button>
+        </> : <p className="small muted">The baker’s dashboard can only be used by the Pastel Treats account.</p>}
         <button className="btn btn-ghost" onClick={async () => { await api.adminSignOut(); onDone() }}>Sign out</button>
       </div>
     </div>
@@ -93,7 +166,7 @@ const NAV = [
   ['Today', [['', 'Overview', 'home'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcement board', 'megaphone'], ['orders', 'Orders', 'receipt'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
   ['Money', [['payments', 'Payments', 'wallet'], ['analytics', 'Sales analytics', 'chart']]],
   ['People', [['customers', 'Customers', 'users'], ['dates', 'Special dates', 'gift'], ['segments', 'Segments', 'heart']]],
-  ['Shop', [['menu', 'Menu & pricing', 'cake'], ['settings', 'Business settings', 'settings'], ['team', 'Team', 'user'], ['data', 'Data & reports', 'download']]],
+  ['Shop', [['menu', 'Menu & pricing', 'cake'], ['settings', 'Business settings', 'settings'], ['data', 'Data & reports', 'download']]],
 ]
 
 function Shell() {
@@ -158,13 +231,15 @@ function Shell() {
 }
 
 export default function AdminApp() {
+  const { pathname } = useLocation()
   const [me, setMe] = useState(undefined)
   const check = useCallback(async () => { try { setMe(await api.adminState()) } catch { setMe({ user: null }) } }, [])
   useEffect(() => { check() }, [check])
   useEffect(() => { document.title = 'Pastel Treats · Admin'; return () => { document.title = 'Pastel Treats' } }, [])
+  if (pathname === '/admin/reset') return <ResetPassword />
   if (me === undefined) return <Spinner />
   if (!me.user) return <Login onDone={check} />
-  if (!me.isAdmin) return <NotAdmin me={me} onDone={check} />
+  if (!me.isAdmin || (!isDemo && !isAdminEmail(me.user.email))) return <NotAdmin me={me} onDone={check} />
   return <AdminData me={me}><Shell /></AdminData>
 }
 

@@ -340,6 +340,9 @@ export function createDemoApi() {
       const a = getSess()?.admin
       return a ? { user: { id: 'demo-admin', email: a.email }, isAdmin: true, role: 'owner' } : { user: null, isAdmin: false }
     },
+    async resetPassword() { err('Demo mode: password reset e-mails work once the bakery database is connected') },
+    async recoveryReady() { return false },
+    async updatePassword() {},
     async adminSignOut() { const s = getSess() || {}; delete s.admin; setSess(s) },
     async claimFirstAdmin() { return true },
     async list(table) {
