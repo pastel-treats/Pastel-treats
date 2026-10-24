@@ -217,6 +217,17 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   ok('sign-up allowed only for pasteltreatsdgl@gmail.com', /closed/.test(bad || '') && good, bad)
 }
 
+// flood protection: a 4th order from the same mobile within an hour is refused
+{
+  const flood = { ...base, phone: '91234 56780', name: 'Spammer' }
+  const msgs = []
+  for (let i = 0; i < 4; i++) {
+    const r = await err(() => asAnon('select place_order($1) r', [{ ...flood, idempotency_key: 'flood-' + i, date: openDay(4 + i), slot_id: slots[2].id }]))
+    msgs.push(r)
+  }
+  ok('max 3 orders per mobile per hour', msgs.slice(0, 3).every((m) => m === null || !/RATE_LIMIT/.test(m)) && /RATE_LIMIT/.test(msgs[3] || ''), msgs[3])
+}
+
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')
 const failed = results.filter((r) => r[0] === 'FAIL').length
 console.log(`\n${results.length - failed}/${results.length} passed`)

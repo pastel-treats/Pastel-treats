@@ -675,6 +675,13 @@ begin
 
   if coalesce(trim(p ->> 'name'), '') = '' then raise exception 'INVALID: please enter your name'; end if;
   if v_phone is null then raise exception 'INVALID: please enter a valid mobile number'; end if;
+  -- flood protection: max 3 new orders per mobile per hour, 40 per hour for the whole shop
+  if (select count(*) from orders where phone = v_phone and created_at > now() - interval '1 hour') >= 3 then
+    raise exception 'RATE_LIMIT: you have placed several orders just now — please wait a little or message us on WhatsApp';
+  end if;
+  if (select count(*) from orders where created_at > now() - interval '1 hour') >= 40 then
+    raise exception 'RATE_LIMIT: we are receiving a lot of orders right now — please try again shortly or message us on WhatsApp';
+  end if;
   if coalesce(jsonb_array_length(p -> 'items'), 0) = 0 then raise exception 'INVALID: your cart is empty'; end if;
   if jsonb_array_length(p -> 'items') > 10 then raise exception 'INVALID: too many items in one order'; end if;
   if coalesce(p ->> 'fulfilment', '') not in ('pickup','delivery','courier') then raise exception 'INVALID: choose pickup or courier'; end if;

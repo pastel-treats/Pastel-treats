@@ -447,3 +447,6 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
 .pw-wrap { position: relative; }
 .pw-wrap .input { padding-right: 64px; }
 .pw-wrap .link-btn { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); }
+.talk-baker { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; background: var(--mint-wash); border-radius: var(--r-sm); padding: 12px 14px; margin-bottom: 12px; }
+.btn-wa { background: #25d366; color: #fff; }
+.btn-wa:hover { background: #1ebe5b; color: #fff; }

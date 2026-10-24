@@ -4,7 +4,8 @@ import { useStore } from '../store.jsx'
 import { api } from '../api/index.js'
 import { priceItem } from '../lib/pricing.js'
 import { inr, cleanError, leadLabel } from '../lib/format.js'
-import { Icon, ProductImage, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB } from '../components/ui.jsx'
+import { Icon, ProductImage, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
+import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 
 function Options({ n, title, list, value, onChange, hint, priceMode = 'extra', priceOf, suffix = '' }) {
   if (!list?.length) return null
@@ -153,6 +154,19 @@ export default function Product() {
                   <label className="field" style={{ marginBottom: 12 }}><span>Describe your dream cake</span>
                     <textarea className="input" maxLength={1500} value={sel.custom_description} onChange={(e) => set('custom_description')(e.target.value)} placeholder="Two-tier, white with gold leaf, fresh flowers cascading down one side…" /></label>
                   <div className="notice warn" style={{ marginBottom: 12 }}><Icon name="sparkle" size={18} /><div>Custom designs are <b>reviewed and quoted by the baker</b> before you pay. The price shown is a starting estimate — your order is confirmed only after we approve the design and you accept the final price.</div></div>
+                  {(settings.whatsapp || settings.phone) && (
+                    <div className="talk-baker">
+                      <div><b>Want to discuss your design first?</b><div className="tiny muted">Send your idea or photos to the baker directly.</div></div>
+                      <div className="row wrap" style={{ gap: 8 }}>
+                        {settings.whatsapp && <a className="btn btn-wa btn-sm" target="_blank" rel="noreferrer"
+                          href={waLink(settings.whatsapp, `Hi Pastel Treats! I'd like to discuss a custom cake design (${p.name}${sel.weight ? `, ${sel.weight}` : ''}).${sel.custom_description?.trim() ? `\nMy idea: ${sel.custom_description.trim().slice(0, 500)}` : ''}\nI'll share reference pictures here.`)}>
+                          <WaIcon size={18} /> Message the baker</a>}
+                        {settings.phone && (callsToday(settings)
+                          ? <a className="btn btn-white btn-sm" href={telLink(settings.phone)}><Icon name="phone" size={16} /> Call the baker</a>
+                          : <span className="tiny muted">{NO_CALL_NOTE}</span>)}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
               <label className="dropzone">
