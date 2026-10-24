@@ -4,4 +4,8 @@
   publish = "dist"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # the database library needs Node 22
+  NODE_VERSION = "22"
+  # These are the PUBLIC database address and key (safe to be in the website by design),
+  # so Netlify's secret scanner must not block the build because of them.
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "sb_publishable_9HairGKKRUJnwUCLowgATA_WbQxOcZL,https://ylgkbbjnxpwjellsbpna.supabase.co,ylgkbbjnxpwjellsbpna"
