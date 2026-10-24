@@ -4,7 +4,7 @@ import { api, isDemo } from '../api/index.js'
 import { DEMO_ADMIN_PASSWORD } from '../api/demo.js'
 import { useStore } from '../store.jsx'
 import { cleanError } from '../lib/format.js'
-import { isAdminEmail, savedAdminEmail, rememberAdminEmail } from '../lib/admin.js'
+import { ADMIN_EMAIL, isAdminEmail, savedAdminEmail, rememberAdminEmail } from '../lib/admin.js'
 import { Icon, Spinner, Field } from '../components/ui.jsx'
 import Overview from './Overview.jsx'
 import Orders from './Orders.jsx'
@@ -52,7 +52,10 @@ function Login({ onDone }) {
   const [remember, setRemember] = useState(true)
   const [busy, setBusy] = useState(false)
   const [forgot, setForgot] = useState(false)
+  const [signup, setSignup] = useState(false)
+  const [pw2, setPw2] = useState('')
   const [sent, setSent] = useState(false)
+  const [confirmSent, setConfirmSent] = useState(false)
   const wrongEmail = !isDemo && email.includes('@') && !isAdminEmail(email)
 
   async function go(e) {
@@ -61,6 +64,13 @@ function Login({ onDone }) {
     setBusy(true)
     try {
       if (forgot) { await api.resetPassword(email.trim()); setSent(true) }
+      else if (signup) {
+        if (pw.length < 8) throw new Error('Use at least 8 characters for the password')
+        if (pw !== pw2) throw new Error('The two passwords don’t match')
+        const signedIn = await api.signUp(email.trim(), pw)
+        rememberAdminEmail(email.trim(), true)
+        if (signedIn) onDone(); else setConfirmSent(true)
+      }
       else {
         await api.signIn(email.trim(), pw)
         rememberAdminEmail(email.trim(), remember)
@@ -72,9 +82,14 @@ function Login({ onDone }) {
     <div style={{ minHeight: '100vh', background: 'var(--mint)', padding: 16 }}>
       <form className="card stack login-card" onSubmit={go} autoComplete="on">
         <img src="logo-mint.svg" alt="Pastel Treats" style={{ borderRadius: 14 }} />
-        <h2 className="center">{forgot ? 'Reset your password' : 'Baker’s dashboard'}</h2>
+        <h2 className="center">{forgot ? 'Reset your password' : signup ? 'Create the bakery account' : 'Baker’s dashboard'}</h2>
         {isDemo && <div className="notice warn small">Demo mode: use any e-mail and the password <b>{DEMO_ADMIN_PASSWORD}</b>.</div>}
-        {sent ? (
+        {confirmSent ? (
+          <div className="notice info small"><Icon name="check" size={18} /><div>
+            <b>Almost done — check {email} for a confirmation e-mail.</b> Open the link <b>on this same phone and browser</b>; it brings you straight into the dashboard. It may land in Spam/Promotions.
+            <br /><br />Already had an account with this e-mail? No e-mail comes in that case — use <b>Forgot password?</b> instead.
+          </div></div>
+        ) : sent ? (
           <div className="notice info small"><Icon name="check" size={18} /><div>
             <b>Check {email} for a reset link.</b> Open it <b>on this same phone and browser</b>. It can take a few minutes and may land in Spam/Promotions.
           </div></div>
@@ -85,17 +100,23 @@ function Login({ onDone }) {
           {!forgot && (
             <Field label="Password">
               <div className="pw-wrap">
-                <input className="input" type={show ? 'text' : 'password'} name="password" required minLength={6} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
+                <input className="input" type={show ? 'text' : 'password'} name="password" required minLength={6} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete={signup ? 'new-password' : 'current-password'} />
                 <button type="button" className="link-btn small" onClick={() => setShow((v) => !v)}>{show ? 'Hide' : 'Show'}</button>
               </div>
             </Field>
           )}
-          {!forgot && <label className="check small"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember my e-mail on this device</label>}
-          <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Please wait…' : forgot ? 'Send reset link' : 'Sign in'}</button>
-          {!forgot && <p className="tiny muted center" style={{ margin: 0 }}>Tip: when your phone offers to <b>save the password</b>, tap Save — next time it fills in by itself.</p>}
+          {signup && <Field label="Type the password again" hint="at least 8 characters"><input className="input" type="password" required value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" /></Field>}
+          {!forgot && !signup && <label className="check small"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember my e-mail on this device</label>}
+          <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Please wait…' : forgot ? 'Send reset link' : signup ? 'Create account' : 'Sign in'}</button>
+          {!forgot && !signup && <p className="tiny muted center" style={{ margin: 0 }}>Tip: when your phone offers to <b>save the password</b>, tap Save — next time it fills in by itself.</p>}
         </>}
         <div className="row between wrap" style={{ marginTop: 4 }}>
-          <button type="button" className="link-btn small" onClick={() => { setForgot((v) => !v); setSent(false) }}>{forgot ? '← Back to sign in' : 'Forgot password?'}</button>
+          {forgot || signup
+            ? <button type="button" className="link-btn small" onClick={() => { setForgot(false); setSignup(false); setSent(false); setConfirmSent(false) }}>← Back to sign in</button>
+            : <>
+                <button type="button" className="link-btn small" onClick={() => setForgot(true)}>Forgot password?</button>
+                {!isDemo && <button type="button" className="link-btn small" onClick={() => { setSignup(true); if (!email) setEmail(ADMIN_EMAIL) }}>First time? Create account</button>}
+              </>}
           <Link to="/" className="small">Back to the shop</Link>
         </div>
       </form>
@@ -233,8 +254,18 @@ function Shell() {
 export default function AdminApp() {
   const { pathname } = useLocation()
   const [me, setMe] = useState(undefined)
-  const check = useCallback(async () => { try { setMe(await api.adminState()) } catch { setMe({ user: null }) } }, [])
+  const check = useCallback(async () => {
+    try {
+      let st = await api.adminState()
+      if (st.user && !st.isAdmin && isAdminEmail(st.user.email)) {
+        try { if (await api.claimFirstAdmin()) st = await api.adminState() } catch { /* shown on the next screen */ }
+      }
+      setMe(st)
+    } catch { setMe({ user: null }) }
+  }, [])
   useEffect(() => { check() }, [check])
+  // tidy the address bar after arriving from a confirmation/reset e-mail link
+  useEffect(() => { if (me && /pt-(confirm|reset)/.test(location.search) && pathname !== '/admin/reset') { try { history.replaceState(null, '', location.pathname + location.hash) } catch { /* */ } } }, [me, pathname])
   useEffect(() => { document.title = 'Pastel Treats · Admin'; return () => { document.title = 'Pastel Treats' } }, [])
   if (pathname === '/admin/reset') return <ResetPassword />
   if (me === undefined) return <Spinner />

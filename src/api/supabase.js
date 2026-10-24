@@ -69,7 +69,11 @@ export function createLiveApi(url, key) {
 
     // ---- admin ----
     async signIn(email, password) { must(await sb.auth.signInWithPassword({ email, password })) },
-    async signUp(email, password) { must(await sb.auth.signUp({ email, password })) },
+    // returns true when signed in straight away, false when a confirmation e-mail was sent
+    async signUp(email, password) {
+      const data = must(await sb.auth.signUp({ email, password, options: { emailRedirectTo: `${location.origin}/?pt-confirm=1` } }))
+      return !!data?.session
+    },
     async adminSignOut() { await sb.auth.signOut() },
     // "Forgot password?" → e-mail with a link back to this site (?pt-reset=1 opens the new-password page)
     async resetPassword(email) { must(await sb.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?pt-reset=1` })) },

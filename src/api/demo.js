@@ -335,7 +335,7 @@ export function createDemoApi() {
       if (password !== DEMO_ADMIN_PASSWORD) err(`INVALID: demo password is ${DEMO_ADMIN_PASSWORD}`)
       setSess({ ...(getSess() || {}), admin: { email } })
     },
-    async signUp(email, password) { return this.signIn(email, password) },
+    async signUp(email, password) { await this.signIn(email, password); return true },
     async adminState() {
       const a = getSess()?.admin
       return a ? { user: { id: 'demo-admin', email: a.email }, isAdmin: true, role: 'owner' } : { user: null, isAdmin: false }

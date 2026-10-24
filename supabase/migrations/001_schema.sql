@@ -1023,3 +1023,19 @@ create policy "pt customers upload order files" on storage.objects for insert to
 drop policy if exists "pt admin read order files" on storage.objects;
 create policy "pt admin read order files" on storage.objects for select to authenticated
   using (bucket_id = 'order-uploads' and public.is_admin());
+
+-- Only the bakery e-mail can create a login (see 006_bakery_only_signup.sql)
+create or replace function public.only_bakery_signup()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.email is null or lower(new.email) <> public.admin_email() then
+    raise exception 'Sign-ups are closed for Pastel Treats';
+  end if;
+  return new;
+end $$;
+do $$ begin
+  if to_regclass('auth.users') is not null then
+    drop trigger if exists pt_only_bakery_signup on auth.users;
+    create trigger pt_only_bakery_signup before insert on auth.users for each row execute function public.only_bakery_signup();
+  end if;
+end $$;

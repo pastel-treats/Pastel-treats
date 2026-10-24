@@ -208,6 +208,15 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   ok('order numbers run 1, 2, 3 … without gaps or repeats', n.length > 1 && n.every((v, i) => v === i + 1), nums.slice(0, 4).join(', '))
 }
 
+// only the bakery e-mail can be created as a login
+{
+  await db.exec(`create table if not exists auth.users(id uuid primary key, email text)`)
+  await db.exec(readFileSync('supabase/migrations/006_bakery_only_signup.sql', 'utf8'))
+  const bad = await err(() => db.exec(`insert into auth.users(id, email) values (gen_random_uuid(), 'stranger@gmail.com')`))
+  let good = true; try { await db.exec(`insert into auth.users(id, email) values (gen_random_uuid(), 'PastelTreatsDgl@gmail.com')`) } catch { good = false }
+  ok('sign-up allowed only for pasteltreatsdgl@gmail.com', /closed/.test(bad || '') && good, bad)
+}
+
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')
 const failed = results.filter((r) => r[0] === 'FAIL').length
 console.log(`\n${results.length - failed}/${results.length} passed`)
