@@ -38,7 +38,6 @@ export function createLiveApi(url, key) {
       return path
     },
     getOrder: (number, phone) => rpcJson('get_order', { p_number: number, p_phone: phone }),
-    getOrdersByPhone: async (phone) => (await rpcJson('get_orders_by_phone', { p_phone: phone })).orders,
     submitProof: (number, phone, reference, path, amount) =>
       rpcJson('submit_payment_proof', { p_number: number, p_phone: phone, p_reference: reference, p_proof_path: path, p_amount: amount }),
 
@@ -77,6 +76,10 @@ export function createLiveApi(url, key) {
     async adminSignOut() { await sb.auth.signOut() },
     // "Forgot password?" → e-mail with a link back to this site (?pt-reset=1 opens the new-password page)
     async resetPassword(email) { must(await sb.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?pt-reset=1` })) },
+    // Deleting customer data: a one-time code is e-mailed to the bakery account first
+    async sendDeleteCode(email) { must(await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } })) },
+    async verifyDeleteCode(email, token) { must(await sb.auth.verifyOtp({ email, token: String(token).trim(), type: 'email' })) },
+    deleteCustomer: (id) => rpcJson('admin_delete_customer', { p_id: id }),
     async recoveryReady() { const { data } = await sb.auth.getSession(); return !!data.session },
     async updatePassword(password) { must(await sb.auth.updateUser({ password })) },
     async adminState() {

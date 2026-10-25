@@ -36,6 +36,7 @@ export function OrderDrawer({ id, onClose }) {
   const o = db.orders.find((x) => x.id === id)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [manual, setManual] = useState('')
   const [sched, setSched] = useState(() => ({ date: o?.confirmed_date || o?.requested_date || '', slot: o?.confirmed_slot_label || o?.slot_label || '' }))
   const [price, setPrice] = useState(() => ({ delivery_charge: o?.delivery_charge || 0, discount: o?.discount || 0, subtotal: o?.subtotal || 0, quote_note: o?.quote_note || '', reason: '' }))
   const [pay, setPay] = useState({ kind: 'advance', method: 'upi', amount: '', reference: '' })
@@ -166,10 +167,16 @@ export function OrderDrawer({ id, onClose }) {
               })()}
               <Field label="Note for the history" hint="optional"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
               <Field label="Or set status manually">
-                <select className="input" value="" onChange={(e) => e.target.value && setStatus(e.target.value)}>
-                  <option value="">Choose…</option>{Object.entries(ORDER_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                <select className="input" value={manual} onChange={(e) => setManual(e.target.value)}>
+                  <option value="">Choose…</option>{Object.entries(ORDER_STATUS).filter(([k]) => k !== o.status).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </Field>
+              {manual && (
+                <div className="row wrap" style={{ gap: 8 }}>
+                  <button className="btn btn-primary btn-sm" onClick={() => { const st = manual; setManual(''); setStatus(st) }}>Save — change to “{ORDER_STATUS[manual]?.label}”</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setManual('')}>Cancel</button>
+                </div>
+              )}
             </div>
           )}
 

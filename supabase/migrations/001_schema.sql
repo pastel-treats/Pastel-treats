@@ -191,6 +191,9 @@ create table if not exists public.customers (
   updated_at timestamptz not null default now()
 );
 create index if not exists customers_email_idx on public.customers (lower(email));
+-- where the customer orders from (state + district/city), filled at checkout and editable
+alter table public.customers add column if not exists state text;
+alter table public.customers add column if not exists city text;
 
 create table if not exists public.customer_addresses (
   id uuid primary key default gen_random_uuid(),
@@ -272,6 +275,8 @@ create table if not exists public.orders (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.orders add column if not exists customer_state text;
+alter table public.orders add column if not exists customer_city text;
 create index if not exists orders_phone_idx on public.orders (phone);
 create index if not exists orders_date_idx on public.orders (coalesce(confirmed_date, requested_date));
 create index if not exists orders_status_idx on public.orders (status);
@@ -743,8 +748,9 @@ begin
   -- customer: match on normalised mobile number only; never overwrite existing details
   select * into cust from customers where customers.phone = v_phone;
   if not found then
-    insert into customers(name, phone, whatsapp, email, marketing_consent, consent_at)
+    insert into customers(name, phone, whatsapp, email, state, city, marketing_consent, consent_at)
     values (trim(p ->> 'name'), v_phone, v_wa, nullif(trim(p ->> 'email'), ''),
+            nullif(left(trim(coalesce(p ->> 'state', '')), 60), ''), nullif(left(trim(coalesce(p ->> 'city', '')), 60), ''),
             coalesce((p ->> 'marketing_consent')::boolean, false),
             case when coalesce((p ->> 'marketing_consent')::boolean, false) then now() end)
     returning * into cust;
@@ -752,6 +758,8 @@ begin
     update customers set
       whatsapp = coalesce(customers.whatsapp, v_wa),
       email = coalesce(customers.email, nullif(trim(p ->> 'email'), '')),
+      state = coalesce(nullif(left(trim(coalesce(p ->> 'state', '')), 60), ''), customers.state),
+      city = coalesce(nullif(left(trim(coalesce(p ->> 'city', '')), 60), ''), customers.city),
       marketing_consent = case when coalesce((p ->> 'marketing_consent')::boolean, false) then true else customers.marketing_consent end,
       consent_at = case when coalesce((p ->> 'marketing_consent')::boolean, false) and not customers.marketing_consent then now() else customers.consent_at end
     where id = cust.id returning * into cust;
@@ -792,6 +800,7 @@ begin
     nullif(p ->> 'alt_date', '')::date, nullif(p ->> 'alt_slot_label', ''),
     nullif(p ->> 'occasion', ''), nullif(p ->> 'occasion_date', '')::date, left(p ->> 'notes', 1000), refs)
   returning * into o;
+  update orders set customer_state = cust.state, customer_city = cust.city where id = o.id returning * into o;
 
   -- optional: remember the occasion for yearly reminders (only if the customer opted in)
   if coalesce((p ->> 'remember_occasion')::boolean, false) and nullif(p ->> 'occasion_date', '') is not null then
@@ -847,6 +856,8 @@ language plpgsql volatile security definer set search_path = public as $$
 declare o orders;
 begin
   perform rate_limit('lookup:' || coalesce(normalize_phone(p_phone), p_phone), 10, interval '10 minutes');
+  -- also limit guesses per Order ID, so nobody can try one ID against many mobile numbers
+  perform rate_limit('lookup-id:' || upper(trim(coalesce(p_number, ''))), 10, interval '10 minutes');
   select * into o from orders where order_number = upper(trim(p_number)) and phone = normalize_phone(p_phone);
   -- return (not raise) so the attempt counter above is kept for rate limiting
   if not found then return jsonb_build_object('error', 'NOT_FOUND: we could not find an order with that number and mobile'); end if;
@@ -854,16 +865,8 @@ begin
 end $$;
 
 -- Track by mobile number only: list that number's orders (no address shown)
-create or replace function public.get_orders_by_phone(p_phone text) returns jsonb
-language plpgsql volatile security definer set search_path = public as $$
-declare v text := normalize_phone(p_phone);
-begin
-  if v is null then return jsonb_build_object('error', 'INVALID: please enter a valid mobile number'); end if;
-  perform rate_limit('phone:' || v, 10, interval '10 minutes');
-  return jsonb_build_object('orders', (select coalesce(jsonb_agg((order_public_view(o) - 'address' - 'payments') order by o.created_at desc), '[]')
-                                          from orders o where o.phone = v and o.created_at > now() - interval '18 months'));
-end $$;
-grant execute on function public.get_orders_by_phone(text) to anon, authenticated;
+-- (Privacy) There is deliberately NO way to list orders by mobile number alone.
+drop function if exists public.get_orders_by_phone(text);
 
 -- Customer reports a UPI payment (stays UNVERIFIED until the baker checks it)
 create or replace function public.submit_payment_proof(p_number text, p_phone text, p_reference text, p_proof_path text, p_amount int)
@@ -988,6 +991,34 @@ do $$ declare t text; begin
     execute format('create policy public_read on public.%I for select to anon, authenticated using (true)', t);
   end loop;
 end $$;
+
+-- Customer data can't be deleted directly: only through admin_delete_customer(),
+-- which needs a code e-mailed to the bakery account in the last 10 minutes.
+drop policy if exists no_direct_customer_delete on public.customers;
+create policy no_direct_customer_delete on public.customers as restrictive for delete to authenticated using (false);
+
+create or replace function public.fresh_email_code()
+returns boolean language sql stable set search_path = public as $$
+  select exists (
+    select 1 from jsonb_array_elements(coalesce(auth.jwt() -> 'amr', '[]'::jsonb)) a
+    where a ->> 'method' in ('otp', 'magiclink')
+      and (a ->> 'timestamp')::bigint > extract(epoch from now())::bigint - 600)
+$$;
+
+create or replace function public.admin_delete_customer(p_id uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare c customers;
+begin
+  if not public.is_admin() then raise exception 'AUTH: only the baker can delete customer data'; end if;
+  if not public.fresh_email_code() then
+    raise exception 'CONFIRM: please confirm with the code sent to the bakery e-mail (valid for 10 minutes)';
+  end if;
+  delete from public.customers where id = p_id returning * into c;
+  if not found then raise exception 'NOT_FOUND: customer not found'; end if;
+  return jsonb_build_object('deleted', true, 'name', c.name);
+end $$;
+revoke all on function public.admin_delete_customer(uuid) from public, anon;
+grant execute on function public.admin_delete_customer(uuid) to authenticated;
 
 -- only owners may manage other admins
 drop policy if exists admin_all on public.admins;

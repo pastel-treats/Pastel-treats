@@ -13,7 +13,7 @@ import { InstallBanner } from './GetApp.jsx'
 const CAT_TINTS = ['#ffebf4', '#bfebef', '#ffec9d', '#ffdac1', '#eafeb4', '#d9efe6']
 const OCCASIONS = [
   ['Birthday', '🎂', '#ffebf4'], ['Anniversary', '💐', '#ffdac1'], ['Baby shower', '🍼', '#bfebef'], ['Wedding', '💍', '#fffaf2'],
-  ['Graduation', '🎓', '#ffec9d'], ['Corporate', '💼', '#d9efe6'], ['Other', '✨', '#eafeb4'],
+  ['Graduation', '🎓', '#ffec9d'], ['Corporate', '💼', '#d9efe6'], ['For all occasions', '✨', '#eafeb4'],
 ]
 
 export default function Home() {
@@ -76,9 +76,10 @@ export default function Home() {
         <div className="wrap">
           <div className="row between" style={{ marginBottom: 18, alignItems: 'flex-end' }}>
             <div><div className="eyebrow">Loved most</div><h2>Featured treats</h2></div>
-            <Link to="/menu" className="btn btn-ghost btn-sm">Full menu</Link>
+            <Link to="/menu" className="btn btn-full-menu">See full menu <Icon name="right" size={18} /></Link>
           </div>
           <div className="grid-products">{featured.map((p) => <ProductCard key={p.id} p={p} />)}</div>
+          <div className="center" style={{ marginTop: 22 }}><Link to="/menu" className="btn-full-menu">Browse the full menu — cakes, brownies, cookies & more <Icon name="right" size={18} /></Link></div>
         </div>
       </section>
 
@@ -120,7 +121,7 @@ export default function Home() {
           <h2 style={{ marginBottom: 18 }}>Make every celebration sweeter</h2>
           <div className="occasions">
             {OCCASIONS.map(([n, ico, bg]) => (
-              <Link key={n} to={`/menu?occasion=${encodeURIComponent(n)}`} className="occ" style={{ background: bg, boxShadow: 'var(--shadow)' }}>
+              <Link key={n} to={n === 'For all occasions' ? '/menu' : `/menu?occasion=${encodeURIComponent(n)}`} className="occ" style={{ background: bg, boxShadow: 'var(--shadow)' }}>
                 <div className="ico" aria-hidden="true">{ico}</div><div className="n">{n}</div>
               </Link>
             ))}

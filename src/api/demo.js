@@ -7,7 +7,7 @@ import { availability as availCalc, ACTIVE } from '../lib/schedule.js'
 import { normalizePhone } from '../lib/contact.js'
 import { todayISO, addDaysISO } from '../lib/dates.js'
 
-const KEY = 'pt-demo-db-v9'
+const KEY = 'pt-demo-db-v10'
 const SESSION = 'pt-demo-session'
 export const DEMO_ADMIN_PASSWORD = 'pastel123'
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now())
@@ -46,7 +46,8 @@ function seedDemoOrders(db) {
   ]
   people.forEach(([name, ph, occ, md], idx) => {
     const c = { id: uid(), name, phone: normalizePhone(ph), phone_verified: false, whatsapp: normalizePhone(ph), email: null, notes: 'Demo record — delete before launch',
-      marketing_consent: idx % 2 === 0, consent_at: idx % 2 === 0 ? nowISO() : null, preferred_reminder: 'whatsapp', created_at: nowISO(), demo: true }
+      marketing_consent: idx % 2 === 0, consent_at: idx % 2 === 0 ? nowISO() : null, preferred_reminder: 'whatsapp', created_at: nowISO(), demo: true,
+      state: idx === 5 ? 'Karnataka' : 'Tamil Nadu', city: ['Dindigul', 'Madurai', 'Dindigul', 'Coimbatore', 'Dindigul', 'Bengaluru'][idx] }
     db.customers.push(c)
     const lastYear = String(+today.slice(0, 4) - 1)
     db.occasions.push({ id: uid(), customer_id: c.id, kind: occ, person_name: name.replace('Demo · ', ''), occasion_date: lastYear + md, repeats: true,
@@ -229,11 +230,13 @@ export function createDemoApi() {
       let c = db.customers.find((x) => x.phone === phone)
       if (!c) {
         c = { id: uid(), name: p.name.trim(), phone, phone_verified: false, whatsapp: wa, email: p.email || null, marketing_consent: !!p.marketing_consent,
-          consent_at: p.marketing_consent ? nowISO() : null, preferred_reminder: 'whatsapp', notes: null, created_at: nowISO() }
+          consent_at: p.marketing_consent ? nowISO() : null, preferred_reminder: 'whatsapp', notes: null, created_at: nowISO(), state: p.state || null, city: p.city || null }
         db.customers.push(c)
       } else {
         c.whatsapp = c.whatsapp || wa
         c.email = c.email || p.email || null
+        if (p.state) c.state = p.state
+        if (p.city) c.city = p.city
         if (p.marketing_consent && !c.marketing_consent) { c.marketing_consent = true; c.consent_at = nowISO() }
       }
       if (p.fulfilment !== 'pickup' && p.save_address !== false && !db.customer_addresses.some((a) => a.customer_id === c.id && a.line.toLowerCase() === p.address.line.trim().toLowerCase()))
@@ -247,6 +250,7 @@ export function createDemoApi() {
       do { db.counters[yy] = (db.counters[yy] || 0) + 1; num = `PT-${db.counters[yy]}-${yy}` } while (db.orders.some((x) => x.order_number === num))
       const zone = db.delivery_zones.find((z) => z.name === q.zone)
       const o = { id: uid(), order_number: num, idempotency_key: p.idempotency_key || null, customer_id: c.id, customer_name: p.name.trim(), phone, whatsapp: wa, email: p.email || null,
+        customer_state: c.state || null, customer_city: c.city || null,
         status, payment_status: 'not_paid', payment_method: method, items: q.items, subtotal: q.subtotal, delivery_charge: q.delivery_charge, discount: 0, total: q.total,
         advance_due: q.advance_due, amount_paid: 0, is_custom: isCustom, quote_status: isCustom ? 'pending' : 'n/a', quote_note: null, fulfilment: p.fulfilment,
         address: p.fulfilment !== 'pickup' ? p.address : null, zone_id: zone?.id || null, needs_delivery_approval: needsZone, requested_date: p.date, slot_id: slot.id,
@@ -342,6 +346,18 @@ export function createDemoApi() {
     },
     async resetPassword() { err('Demo mode: password reset e-mails work once the bakery database is connected') },
     async recoveryReady() { return false },
+    async sendDeleteCode() { /* demo: the code is always 123456 */ },
+    async verifyDeleteCode(email, token) { if (String(token).trim() !== '123456') err('INVALID: wrong code (demo code is 123456)'); setSess({ ...(getSess() || {}), codeAt: Date.now() }) },
+    async deleteCustomer(id) {
+      const s = getSess() || {}
+      if (!s.codeAt || Date.now() - s.codeAt > 600000) err('CONFIRM: please confirm with the code sent to the bakery e-mail')
+      const db = load()
+      db.customers = db.customers.filter((c) => c.id !== id)
+      db.customer_addresses = db.customer_addresses.filter((a) => a.customer_id !== id)
+      db.occasions = db.occasions.filter((o) => o.customer_id !== id)
+      db.orders.forEach((o) => { if (o.customer_id === id) o.customer_id = null })
+      save(); return { deleted: true }
+    },
     async updatePassword() {},
     async adminSignOut() { const s = getSess() || {}; delete s.admin; setSess(s) },
     async claimFirstAdmin() { return true },

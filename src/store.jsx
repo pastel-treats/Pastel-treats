@@ -34,7 +34,7 @@ export function StoreProvider({ children }) {
     removeLine: (key) => setCart((c) => c.filter((l) => l.key !== key)),
     clearCart: () => setCart([]),
     myOrders,
-    rememberOrder: (o) => setMyOrders((m) => [o, ...m.filter((x) => x.number !== o.number)].slice(0, 20)),
+    rememberOrder: (o) => setMyOrders((m) => [{ ...(m.find((x) => x.number === o.number) || {}), ...o }, ...m.filter((x) => x.number !== o.number)].slice(0, 30)),
   }), [data, error, reload, toast, cart, myOrders])
 
   return (

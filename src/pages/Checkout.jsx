@@ -8,6 +8,8 @@ import { normalizePhone } from '../lib/contact.js'
 import { fmtDate, todayISO, addDaysISO } from '../lib/dates.js'
 import Calendar from '../components/Calendar.jsx'
 import PhoneInput, { validPhone } from '../components/PhoneInput.jsx'
+import PlaceSelect from '../components/PlaceSelect.jsx'
+import { DEFAULT_STATE } from '../data/places.js'
 import { Empty, Field, Icon, ProductImage, Modal, compressImage, ACCEPT_IMG } from '../components/ui.jsx'
 import UpiPayBox from '../components/UpiPayBox.jsx'
 import { PolicyText, LocationCard } from './Info.jsx'
@@ -21,7 +23,7 @@ export default function Checkout() {
   const tz = s.timezone || 'Asia/Kolkata'
   const [f, setF] = useState(() => ({
     fulfilment: 'pickup', date: null, slotId: null, slotLabel: null, alt_date: '', alt_slot_label: '',
-    name: '', phone: '', sameWa: true, whatsapp: '', email: '',
+    name: '', phone: '', sameWa: true, whatsapp: '', email: '', state: DEFAULT_STATE, city: '',
     address: { line: '', area: '', city: 'Dindigul', pincode: '', landmark: '', instructions: '' },
     occasion: '', occasion_date: '', occasion_person: '', remember_occasion: false, marketing_consent: false,
     notes: '', payment_method: 'upi', accepted_policies: false, request_out_of_zone: false,
@@ -41,7 +43,7 @@ export default function Checkout() {
   useEffect(() => {
     try {
       const last = JSON.parse(localStorage.getItem('pt-last-details') || 'null')
-      if (last) setF((x) => ({ ...x, name: x.name || last.name || '', phone: x.phone || last.phone || '', email: x.email || last.email || '' }))
+      if (last) setF((x) => ({ ...x, name: x.name || last.name || '', phone: x.phone || last.phone || '', email: x.email || last.email || '', state: x.city ? x.state : last.state || x.state, city: x.city || last.city || '' }))
     } catch { /* private mode */ }
   }, [])
 
@@ -80,6 +82,7 @@ export default function Checkout() {
     if (!f.date || !f.slotId) e.slot = 'Please choose a date and time slot'
     if (!f.name.trim()) e.name = 'Please enter your name'
     if (!validPhone(f.phone)) e.phone = 'Please enter a valid mobile number'
+    if (!f.state || !f.city.trim()) e.city = 'Please choose where you are ordering from'
     if (!f.sameWa && f.whatsapp && !validPhone(f.whatsapp)) e.whatsapp = 'Please check this number'
     if (f.email && !/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Please check your e-mail'
     if (f.fulfilment === 'courier' && !courierable) e.line = 'Some items can’t be couriered — please choose self pickup'
@@ -116,7 +119,7 @@ export default function Checkout() {
       idempotency_key: idem.current,
       items: cart.map(({ key, ref_previews, ...rest }) => rest),
       fulfilment: f.fulfilment, date: f.date, slot_id: f.slotId, alt_date: f.alt_date || null, alt_slot_label: f.alt_slot_label || null,
-      name: f.name.trim(), phone: f.phone, whatsapp: f.sameWa ? f.phone : f.whatsapp || f.phone, email: f.email.trim(),
+      name: f.name.trim(), phone: f.phone, whatsapp: f.sameWa ? f.phone : f.whatsapp || f.phone, email: f.email.trim(), state: f.state, city: f.city.trim(),
       address: shipping ? f.address : null, request_out_of_zone: outOfZone && f.request_out_of_zone,
       occasion: f.occasion, occasion_date: f.occasion_date || null, occasion_person: f.occasion_person, remember_occasion: f.remember_occasion,
       marketing_consent: f.marketing_consent, notes: [f.notes, f.address.instructions && shipping ? 'Courier/delivery note: ' + f.address.instructions : ''].filter(Boolean).join('\n'),
@@ -124,14 +127,15 @@ export default function Checkout() {
     }
     try {
       const r = await api.placeOrder(payload)
-      rememberOrder({ number: r.order_number, phone: normalizePhone(f.phone), at: new Date().toISOString() })
+      rememberOrder({ number: r.order_number, phone: normalizePhone(f.phone), at: new Date().toISOString(), status: r.status,
+        items: (q.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '), total: r.total, date: f.date, fulfilment: f.fulfilment })
       if (payFirst) {
         try {
           const path = proof ? await api.uploadFile('proof', await compressImage(proof, 1200)) : null
           await api.submitProof(r.order_number, f.phone, utr.trim(), path, q.advance_due)
         } catch (pe) { toast('Order placed. Please send your payment details again on the next screen: ' + cleanError(pe), true) }
       }
-      try { localStorage.setItem('pt-last-details', JSON.stringify({ name: f.name.trim(), phone: f.phone, email: f.email })) } catch { /* */ }
+      try { localStorage.setItem('pt-last-details', JSON.stringify({ name: f.name.trim(), phone: f.phone, email: f.email, state: f.state, city: f.city.trim() })) } catch { /* */ }
       clearCart()
       sessionStorage.removeItem(DRAFT)
       sessionStorage.removeItem('pt-idem')
@@ -241,6 +245,10 @@ export default function Checkout() {
               <div data-err="name"><Field label="Full name" error={errors.name}><input className={'input' + (errors.name ? ' err' : '')} autoComplete="name" value={f.name} onChange={(e) => set('name')(e.target.value)} /></Field></div>
               <div data-err="phone"><Field label="Mobile number" error={errors.phone}><PhoneInput invalid={!!errors.phone} value={f.phone} onChange={set('phone')} /></Field></div>
             </div>
+            <div data-err="city" style={{ marginTop: 12 }}>
+              <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>Where are you ordering from?</div>
+              <PlaceSelect state={f.state} city={f.city} error={errors.city} onChange={({ state, city }) => setF((x) => ({ ...x, state, city }))} />
+            </div>
             <label className="check" style={{ margin: '12px 0' }}><input type="checkbox" checked={f.sameWa} onChange={(e) => set('sameWa')(e.target.checked)} /> Use the same number for WhatsApp updates</label>
             <div className="grid-2">
               {!f.sameWa && <div data-err="whatsapp"><Field label="WhatsApp number" error={errors.whatsapp}><PhoneInput invalid={!!errors.whatsapp} value={f.whatsapp} onChange={set('whatsapp')} /></Field></div>}
@@ -250,7 +258,7 @@ export default function Checkout() {
             <div className="grid-2">
               <Field label="What’s the occasion?" hint="optional">
                 <select className="input" value={f.occasion} onChange={(e) => set('occasion')(e.target.value)}>
-                  <option value="">Just because</option>{OCCASIONS.map((o) => <option key={o}>{o}</option>)}
+                  <option value="">Craving 😋</option>{OCCASIONS.map((o) => <option key={o}>{o}</option>)}
                 </select>
               </Field>
               <div data-err="occasion_date"><Field label="Occasion date" hint="optional" error={errors.occasion_date}><input type="date" className="input" value={f.occasion_date} onChange={(e) => set('occasion_date')(e.target.value)} /></Field></div>

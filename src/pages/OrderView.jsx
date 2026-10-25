@@ -183,7 +183,11 @@ export default function OrderView() {
     try {
       const r = await api.getOrder(number, ph)
       setO(r); setErr(null)
-      rememberOrder({ number, phone: normalizePhone(ph), at: known?.at || new Date().toISOString() })
+      rememberOrder({
+        number, phone: normalizePhone(ph), at: known?.at || r.created_at || new Date().toISOString(),
+        items: (r.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '),
+        total: r.total, date: r.confirmed_date || r.requested_date, status: r.status, fulfilment: r.fulfilment,
+      })
     } catch (e) { setErr(cleanError(e)) } finally { setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [number, phone])

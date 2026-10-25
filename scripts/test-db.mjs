@@ -112,8 +112,14 @@ ok('orders refused while paused', /On leave till Monday/.test(ePause || ''), ePa
 await db.exec(`update settings set data = data || '{"orders_paused":false}'`)
 
 // track by mobile only
-const list = (await asAnon('select get_orders_by_phone($1) r', ['98765 43210'])).rows[0].r
-ok('track by mobile lists orders without address', list.orders.length === 2 && list.orders.every((o) => !('address' in o)), `n=${list.orders.length}`)
+const noList = await err(() => asAnon('select get_orders_by_phone($1) r', ['98765 43210']))
+ok('a mobile number alone cannot list orders (privacy)', /does not exist/.test(noList || ''), noList)
+{
+  // one Order ID tried against many different mobiles gets blocked
+  let blocked = false
+  for (let i = 0; i < 12; i++) { const r = await err(() => asAnon('select get_order($1,$2) r', ['PT-99-26', '90000001' + String(i).padStart(2, '0')])); if (/RATE_LIMIT/.test(r || '')) blocked = true }
+  ok('guessing one Order ID with many mobiles is blocked', blocked)
+}
 
 // 20. order lookup needs matching phone
 const eLook = (await asAnon('select get_order($1,$2) r', [o1.order_number, '9000000009'])).rows[0].r
@@ -226,6 +232,30 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
     msgs.push(r)
   }
   ok('max 3 orders per mobile per hour', msgs.slice(0, 3).every((m) => m === null || !/RATE_LIMIT/.test(m)) && /RATE_LIMIT/.test(msgs[3] || ''), msgs[3])
+}
+
+// deleting a customer needs a fresh e-mail code (OTP) — not possible directly
+{
+  const cid = (await db.query(`insert into customers(name, phone) values ('Delete Me', '+919000077777') returning id`)).rows[0].id
+  await asUser(ADMIN, AC, `delete from customers where id = $1`, [cid])
+  const still = (await db.query(`select count(*)::int n from customers where id = $1`, [cid])).rows[0].n
+  const noCode = await err(() => asUser(ADMIN, AC, 'select admin_delete_customer($1)', [cid]))
+  const oldCode = await err(() => asUser(ADMIN, { ...AC, amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) - 3600 }] }, 'select admin_delete_customer($1)', [cid]))
+  const notBaker = await err(() => asUser('44444444-4444-4444-4444-444444444444', { email: 'x@y.com', amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] }, 'select admin_delete_customer($1)', [cid]))
+  const okDel = await err(() => asUser(ADMIN, { ...AC, amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] }, 'select admin_delete_customer($1)', [cid]))
+  const gone = (await db.query(`select count(*)::int n from customers where id = $1`, [cid])).rows[0].n
+  ok('customer delete needs a fresh e-mail code', still === 1 && /CONFIRM/.test(noCode || '') && /CONFIRM/.test(oldCode || '') && /AUTH/.test(notBaker || '') && okDel === null && gone === 0, [noCode, okDel].join(' | '))
+}
+
+// customer place: saved on first order, updated when changed
+{
+  const ph = '93000 11122'
+  await asAnon('select place_order($1) r', [{ ...base, phone: ph, name: 'Place Test', state: 'Tamil Nadu', city: 'Madurai', idempotency_key: 'pl1', date: openDay(6), slot_id: slots[3].id }])
+  const c1 = (await db.query(`select state, city from customers where phone = '+919300011122'`)).rows[0]
+  await asAnon('select place_order($1) r', [{ ...base, phone: ph, name: 'Place Test', state: 'Karnataka', city: 'Bengaluru', idempotency_key: 'pl2', date: openDay(7), slot_id: slots[3].id }])
+  const c2 = (await db.query(`select state, city from customers where phone = '+919300011122'`)).rows[0]
+  const o2 = (await db.query(`select customer_city from orders where idempotency_key = 'pl2'`)).rows[0]
+  ok('customer place saved and updated', c1.city === 'Madurai' && c2.city === 'Bengaluru' && c2.state === 'Karnataka' && o2.customer_city === 'Bengaluru', JSON.stringify([c1, c2]))
 }
 
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')

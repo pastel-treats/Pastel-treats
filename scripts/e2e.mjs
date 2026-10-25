@@ -61,7 +61,8 @@ log('courier disabled for cake:', await page.getByRole('button', { name: /Courie
 await page.locator('input[autocomplete="name"]').fill('Priya Raman')
 log('country code default:', await page.locator('.phone-input .cc span').first().innerText())
 await page.locator('.phone-input input').first().fill('9876543210')
-await page.locator('select').filter({ hasText: 'Just because' }).selectOption('Birthday')
+await page.locator('select').filter({ hasText: 'Choose…' }).first().selectOption('Dindigul')
+await page.locator('select').filter({ hasText: 'Craving' }).selectOption('Birthday')
 await page.locator('input[type="date"]').last().fill('2026-10-24')
 await page.getByText('Remember this date').click()
 await page.getByText('Send me occasional offers').click()
@@ -87,12 +88,19 @@ await shot('08-order-full', true)
 log('order page says payment received, no second QR:', (await page.locator('.notice', { hasText: 'Payment details received' }).count()) === 1 && (await page.locator('.qr-box').count()) === 0)
 log('payment status after proof:', await page.locator('.badge').nth(1).innerText())
 
-// track by mobile number only
+// My orders: this phone's orders show automatically; another phone needs Order ID + mobile
 await page.goto(BASE + '/#/track')
+await wait(400)
+log('orders on this phone:', await page.locator('.list-row').count(), '| shows status:', await page.locator('.list-row .badge').count() > 0)
+await page.evaluate(() => localStorage.removeItem('pt-my-orders'))
+await page.reload(); await wait(400)
+log('other phone, mobile only → nothing listed:', await page.locator('.list-row').count() === 0)
+await page.locator('input[placeholder="PT-12-26"]').fill(orderNo)
 await page.locator('.phone-input input').fill('9876543210')
-await page.getByRole('button', { name: /Show my orders/ }).click()
-await wait(500)
-log('orders found by mobile:', await page.locator('.list-row').count())
+await page.getByRole('button', { name: /Show my order/ }).click()
+await page.waitForURL(/#\/order\//, { timeout: 6000 }).catch(() => {})
+log('found by Order ID + mobile:', page.url().includes('/order/' + orderNo))
+await page.goto(BASE + '/#/track'); await wait(300)
 await shot('09-my-orders')
 
 // ---------- admin ----------

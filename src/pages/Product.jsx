@@ -7,6 +7,31 @@ import { inr, cleanError, leadLabel } from '../lib/format.js'
 import { Icon, ProductImage, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 
+// Main product photo: swipe left/right (touch or mouse drag), arrow buttons and keyboard arrows.
+function Swipe({ count, index, onChange, children }) {
+  const start = React.useRef(null)
+  const go = (d) => count > 1 && onChange((index + d + count) % count)
+  const down = (e) => { start.current = { x: e.clientX, y: e.clientY } }
+  const up = (e) => {
+    const s0 = start.current; start.current = null
+    if (!s0 || count < 2) return
+    const dx = e.clientX - s0.x, dy = e.clientY - s0.y
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) go(dx < 0 ? 1 : -1)
+  }
+  return (
+    <div className={'main swipe' + (count > 1 ? ' multi' : '')} onPointerDown={down} onPointerUp={up} onPointerCancel={() => { start.current = null }}
+      tabIndex={count > 1 ? 0 : undefined} onKeyDown={(e) => { if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1) }}
+      aria-roledescription={count > 1 ? 'carousel' : undefined} aria-label={count > 1 ? `Photo ${index + 1} of ${count}. Swipe for more.` : undefined}>
+      {children}
+      {count > 1 && <>
+        <button type="button" className="sw-arrow l" aria-label="Previous photo" onClick={() => go(-1)}>‹</button>
+        <button type="button" className="sw-arrow r" aria-label="Next photo" onClick={() => go(1)}>›</button>
+        <div className="sw-dots" aria-hidden="true">{Array.from({ length: count }, (_, i) => <i key={i} className={i === index ? 'on' : ''} />)}</div>
+      </>}
+    </div>
+  )
+}
+
 function Options({ n, title, list, value, onChange, hint, priceMode = 'extra', priceOf, suffix = '' }) {
   if (!list?.length) return null
   return (
@@ -93,9 +118,12 @@ export default function Product() {
       <div className="pd">
         <div className="gallery">
           <div className="tiny muted" style={{ marginBottom: 8 }}><Link to="/menu">Menu</Link> {cat && <>/ <Link to={`/menu/${cat.slug}`}>{cat.name}</Link></>}</div>
-          <div className="main"><ProductImage product={p} index={img} /></div>
+          <Swipe count={p.images?.length || 1} index={img} onChange={setImg}>
+            <ProductImage key={img} product={p} index={img} />
+          </Swipe>
           {p.images?.length > 1 && (
-            <div className="thumbs">{p.images.map((src, i) => <button key={src} className={i === img ? 'on' : ''} onClick={() => setImg(i)} aria-label={`Photo ${i + 1}`}><img src={src} alt="" /></button>)}</div>
+            <div className="thumbs">{p.images.map((src, i) => <button key={src} className={i === img ? 'on' : ''} onClick={() => setImg(i)} aria-label={`Photo ${i + 1}`}
+              ref={(el) => { if (el && i === img) { const row = el.parentElement; const x = el.offsetLeft - row.clientWidth / 2 + el.clientWidth / 2; row.scrollTo({ left: Math.max(0, x), behavior: 'smooth' }) } }}><img src={src} alt="" loading="lazy" /></button>)}</div>
           )}
         </div>
         <div>
