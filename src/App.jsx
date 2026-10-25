@@ -10,6 +10,7 @@ import OrderView from './pages/OrderView.jsx'
 import Track from './pages/Track.jsx'
 import { Contact, Policies } from './pages/Info.jsx'
 import GetApp from './pages/GetApp.jsx'
+import OrderLink from './pages/OrderLink.jsx'
 import { Spinner, Empty } from './components/ui.jsx'
 import { useStore } from './store.jsx'
 
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="cart" element={<Cart />} />
           <Route path="checkout" element={<Checkout />} />
           <Route path="order/:number" element={<OrderView />} />
+          <Route path="o/:token" element={<OrderLink />} />
           <Route path="track" element={<Track />} />
           <Route path="account" element={<Navigate to="/track" replace />} />
           <Route path="contact" element={<Contact />} />

@@ -127,7 +127,7 @@ export default function Checkout() {
     }
     try {
       const r = await api.placeOrder(payload)
-      rememberOrder({ number: r.order_number, phone: normalizePhone(f.phone), at: new Date().toISOString(), status: r.status,
+      rememberOrder({ number: r.order_number, phone: normalizePhone(f.phone), at: new Date().toISOString(), status: r.status, link_token: r.link_token,
         items: (q.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '), total: r.total, date: f.date, fulfilment: f.fulfilment })
       if (payFirst) {
         try {

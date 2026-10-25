@@ -13,14 +13,19 @@ import { Field, Icon, StatusBadge, WaIcon } from '../components/ui.jsx'
 export default function Track() {
   const { myOrders, rememberOrder, toast, settings: s } = useStore()
   const nav = useNavigate()
+  const yyNow = String(new Date().getFullYear()).slice(2)
   const [number, setNumber] = useState('')
+  const [yy, setYy] = useState(yyNow)
   const [phone, setPhone] = useState(() => myOrders[0]?.phone || '')
   const [busy, setBusy] = useState(false)
 
   async function find(e) {
     e.preventDefault()
-    const n = number.trim().toUpperCase().replace(/\s+/g, '')
-    if (!/^PT-?\d/.test(n)) return toast('Enter the Order ID, e.g. PT-12-26', true)
+    // accepts just the number ("12") or a full ID pasted in ("PT-12-26")
+    const raw = number.trim().toUpperCase().replace(/\s+/g, '')
+    const full = raw.match(/^PT-?(\d+)-?(\d{2})$/)
+    const n = full ? `PT-${+full[1]}-${full[2]}` : /^\d+$/.test(raw) ? `PT-${+raw}-${yy}` : raw
+    if (!/^PT-\d+-\d{2}$/.test(n)) return toast('Enter your order number, e.g. 12', true)
     if (!validPhone(phone)) return toast('Enter the mobile number used for the order', true)
     setBusy(true)
     try {
@@ -57,10 +62,16 @@ export default function Track() {
       <form className="card stack" style={{ marginTop: 16 }} onSubmit={find}>
         <div>
           <div className="card-title" style={{ marginBottom: 2 }}>Find an order</div>
-          <p className="small muted" style={{ margin: 0 }}>Ordered from another phone? Enter the <b>Order ID</b> and the <b>mobile number</b> used. For your privacy, a mobile number alone doesn’t show any orders.</p>
+          <p className="small muted" style={{ margin: 0 }}><b>Easiest:</b> tap your <b>order link</b> in your WhatsApp chat with us. Or enter your order number and mobile below — for your privacy, a mobile number alone doesn’t show any orders.</p>
         </div>
-        <Field label="Order ID" hint="e.g. PT-12-26 — it’s in your order confirmation / WhatsApp message">
-          <input className="input" value={number} onChange={(e) => setNumber(e.target.value)} placeholder="PT-12-26" autoCapitalize="characters" autoComplete="off" />
+        <Field label="Order number" hint="just the number — for PT-12-26 type 12">
+          <div className="id-input">
+            <span>PT-</span>
+            <input inputMode="numeric" value={number} onChange={(e) => setNumber(e.target.value.toUpperCase().replace(/[^0-9PT-]/g, '').slice(0, 12))} placeholder="12" autoComplete="off" aria-label="Order number" />
+            <select value={yy} onChange={(e) => setYy(e.target.value)} aria-label="Year">
+              {[yyNow, String(+yyNow - 1).padStart(2, '0')].map((y) => <option key={y} value={y}>-{y}</option>)}
+            </select>
+          </div>
         </Field>
         <Field label="Mobile number"><PhoneInput required value={phone} onChange={setPhone} /></Field>
         <button className="btn btn-primary" disabled={busy}>{busy ? 'Looking…' : 'Show my order'}</button>

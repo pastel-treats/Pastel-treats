@@ -92,10 +92,21 @@ log('payment status after proof:', await page.locator('.badge').nth(1).innerText
 await page.goto(BASE + '/#/track')
 await wait(400)
 log('orders on this phone:', await page.locator('.list-row').count(), '| shows status:', await page.locator('.list-row .badge').count() > 0)
+const token = await page.evaluate(() => (JSON.parse(localStorage.getItem('pt-my-orders') || '[]')[0] || {}).link_token)
+{
+  // the private link opened on a different phone (fresh browser, demo data copied over) opens the order with no typing
+  const dbCopy = await page.evaluate(() => localStorage.getItem('pt-demo-db-v10'))
+  const other = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const p2 = await other.newPage()
+  await p2.goto(BASE + '/'); await p2.evaluate((d) => localStorage.setItem('pt-demo-db-v10', d), dbCopy)
+  await p2.goto(BASE + '/#/o/' + token); await p2.waitForTimeout(1200)
+  log('private link opens order on another phone:', !!token && p2.url().includes('/order/' + orderNo), '| fake link refused:', await (async () => { await p2.goto(BASE + '/#/o/0000000000ffff'); await p2.waitForTimeout(800); return (await p2.locator('body').innerText()).includes('didn’t work') })())
+  await other.close()
+}
 await page.evaluate(() => localStorage.removeItem('pt-my-orders'))
 await page.reload(); await wait(400)
 log('other phone, mobile only → nothing listed:', await page.locator('.list-row').count() === 0)
-await page.locator('input[placeholder="PT-12-26"]').fill(orderNo)
+await page.locator('input[aria-label="Order number"]').fill(orderNo.split('-')[1])
 await page.locator('.phone-input input').fill('9876543210')
 await page.getByRole('button', { name: /Show my order/ }).click()
 await page.waitForURL(/#\/order\//, { timeout: 6000 }).catch(() => {})

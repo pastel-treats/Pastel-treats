@@ -258,6 +258,15 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   ok('customer place saved and updated', c1.city === 'Madurai' && c2.city === 'Bengaluru' && c2.state === 'Karnataka' && o2.customer_city === 'Bengaluru', JSON.stringify([c1, c2]))
 }
 
+// private order link: opens the order without typing; a made-up link opens nothing
+{
+  const r = (await asAnon('select place_order($1) r', [{ ...base, phone: '93000 22233', name: 'Link Test', idempotency_key: 'lk1', date: openDay(8), slot_id: slots[3].id }])).rows[0].r
+  const viaLink = (await asAnon('select get_order_by_link($1) r', [r.link_token])).rows[0].r
+  const fake = (await asAnon('select get_order_by_link($1) r', ['abcdef1234567890'])).rows[0].r
+  const short = (await asAnon('select get_order_by_link($1) r', ['ab'])).rows[0].r
+  ok('private order link works, fake links don\'t', r.link_token?.length === 14 && viaLink.order_number === r.order_number && viaLink.phone === '+919300022233' && /NOT_FOUND/.test(fake.error) && /NOT_FOUND/.test(short.error), r.link_token)
+}
+
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')
 const failed = results.filter((r) => r[0] === 'FAIL').length
 console.log(`\n${results.length - failed}/${results.length} passed`)

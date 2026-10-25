@@ -1,7 +1,40 @@
--- Pastel Treats update (Oct 2026): private "My orders", customer place, code-confirmed delete, order flood limit.
+-- Pastel Treats update (Oct 2026): private order links, private "My orders", customer place,
+-- code-confirmed customer delete, order flood limit.
 -- Run this ONLY together with publishing the matching website update. Paste ALL of it → Supabase → SQL Editor → Run.
 
--- 1. Privacy: no listing of orders by mobile number alone
+-- 1. Private order links (tap to open — no typing)
+alter table public.orders add column if not exists access_token text default substr(replace(gen_random_uuid()::text, '-', ''), 1, 14);
+update public.orders set access_token = substr(replace(gen_random_uuid()::text, '-', ''), 1, 14) where access_token is null;
+create unique index if not exists orders_access_token_idx on public.orders (access_token);
+create or replace function public.order_public_view(o orders) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'order_number', o.order_number, 'status', o.status, 'payment_status', o.payment_status,
+    'payment_method', o.payment_method, 'customer_name', o.customer_name,
+    'items', o.items, 'subtotal', o.subtotal, 'delivery_charge', o.delivery_charge, 'discount', o.discount,
+    'total', o.total, 'advance_due', o.advance_due, 'amount_paid', o.amount_paid,
+    'balance', o.total - o.amount_paid, 'is_custom', o.is_custom, 'quote_status', o.quote_status, 'quote_note', o.quote_note,
+    'fulfilment', o.fulfilment, 'address', o.address, 'requested_date', o.requested_date, 'slot_label', o.slot_label,
+    'confirmed_date', o.confirmed_date, 'confirmed_slot_label', o.confirmed_slot_label,
+    'needs_delivery_approval', o.needs_delivery_approval, 'created_at', o.created_at, 'link_token', o.access_token,
+    'history', (select coalesce(jsonb_agg(jsonb_build_object('to', h.to_status, 'at', h.created_at) order by h.created_at), '[]')
+                  from order_status_history h where h.order_id = o.id),
+    'payments', (select coalesce(jsonb_agg(jsonb_build_object('kind', y.kind, 'method', y.method, 'amount', y.amount, 'status', y.status, 'at', y.created_at) order by y.created_at), '[]')
+                  from payments y where y.order_id = o.id)
+  )
+$$;
+create or replace function public.get_order_by_link(p_token text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare o orders;
+begin
+  if coalesce(length(trim(p_token)), 0) < 12 then return jsonb_build_object('error', 'NOT_FOUND: this order link is not valid'); end if;
+  select * into o from orders where access_token = trim(p_token);
+  if not found then return jsonb_build_object('error', 'NOT_FOUND: this order link is not valid'); end if;
+  return order_public_view(o) || jsonb_build_object('phone', o.phone);
+end $$;
+grant execute on function public.get_order_by_link(text) to anon, authenticated;
+
+-- 2. Privacy: no listing of orders by mobile number alone
 drop function if exists public.get_orders_by_phone(text);
 create or replace function public.get_order(p_number text, p_phone text) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -17,13 +50,13 @@ begin
 end $$;
 grant execute on function public.get_order(text, text) to anon, authenticated;
 
--- 2. Where customers order from
+-- 3. Where customers order from
 alter table public.customers add column if not exists state text;
 alter table public.customers add column if not exists city text;
 alter table public.orders add column if not exists customer_state text;
 alter table public.orders add column if not exists customer_city text;
 
--- 3. Orders: saves the place + flood protection (3 per mobile per hour, 40 per hour in total)
+-- 4. Orders: saves the place, returns the private link, flood protection (3 per mobile per hour, 40 per hour in total)
 create or replace function public.place_order(p jsonb) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -36,7 +69,7 @@ begin
   if p ->> 'idempotency_key' is not null then
     select * into o from orders where idempotency_key = p ->> 'idempotency_key';
     if found then
-      return jsonb_build_object('order_number', o.order_number, 'duplicate', true, 'total', o.total, 'advance_due', o.advance_due, 'status', o.status);
+      return jsonb_build_object('order_number', o.order_number, 'duplicate', true, 'total', o.total, 'advance_due', o.advance_due, 'status', o.status, 'link_token', o.access_token);
     end if;
   end if;
 
@@ -173,11 +206,11 @@ begin
 
   return jsonb_build_object('order_number', o.order_number, 'status', o.status, 'total', o.total,
     'advance_due', o.advance_due, 'subtotal', o.subtotal, 'delivery_charge', o.delivery_charge,
-    'is_custom', o.is_custom, 'needs_delivery_approval', o.needs_delivery_approval, 'duplicate', false);
+    'is_custom', o.is_custom, 'needs_delivery_approval', o.needs_delivery_approval, 'duplicate', false, 'link_token', o.access_token);
 end $$;
 grant execute on function public.place_order(jsonb) to anon, authenticated;
 
--- 4. Deleting customer data needs a code e-mailed to the bakery
+-- 5. Deleting customer data needs a code e-mailed to the bakery
 -- Customer data can't be deleted directly: only through admin_delete_customer(),
 -- which needs a code e-mailed to the bakery account in the last 10 minutes.
 drop policy if exists no_direct_customer_delete on public.customers;

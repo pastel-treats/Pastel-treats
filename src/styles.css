@@ -470,3 +470,9 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
 .thumbs { position: relative; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
 .thumbs button { flex: none; }
 .pd > * { min-width: 0; } .gallery { min-width: 0; max-width: 100%; }
+.link-box { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: var(--mint-wash); border-radius: var(--r-sm); padding: 10px 14px; margin-bottom: 14px; }
+.id-input { display: flex; align-items: stretch; min-height: 48px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; overflow: hidden; }
+.id-input:focus-within { border-color: var(--mint); box-shadow: 0 0 0 4px var(--mint-soft); }
+.id-input span { display: grid; place-items: center; padding: 0 4px 0 14px; font-weight: 600; color: var(--forest); }
+.id-input input { flex: 1 1 auto; width: 0; min-width: 0; border: 0; outline: none; font: inherit; font-size: 1.15rem; font-weight: 600; padding: 8px 4px; color: var(--ink); background: transparent; }
+.id-input select { border: 0; border-left: 1.5px solid var(--line); background: var(--ivory, #f6efe7); font: inherit; font-weight: 600; color: var(--forest); padding: 0 10px; }

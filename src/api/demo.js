@@ -137,8 +137,9 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(cache)) } catch (e) { console.warn('Demo storage full', e) }
 }
 const err = (m) => { throw new Error(m) }
+const newToken = () => Array.from({ length: 14 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('')
 const view = (db, o) => ({
-  ...o, balance: o.total - o.amount_paid,
+  ...o, balance: o.total - o.amount_paid, link_token: o.access_token || (o.access_token = newToken()),
   history: db.order_status_history.filter((h) => h.order_id === o.id).map((h) => ({ to: h.to_status, at: h.created_at })),
   payments: db.payments.filter((p) => p.order_id === o.id).map((p) => ({ kind: p.kind, method: p.method, amount: p.amount, status: p.status, at: p.created_at })),
 })
@@ -192,7 +193,7 @@ export function createDemoApi() {
       const db = load()
       if (p.idempotency_key) {
         const dup = db.orders.find((o) => o.idempotency_key === p.idempotency_key)
-        if (dup) return { order_number: dup.order_number, duplicate: true, total: dup.total, advance_due: dup.advance_due, status: dup.status }
+        if (dup) return { order_number: dup.order_number, duplicate: true, total: dup.total, advance_due: dup.advance_due, status: dup.status, link_token: dup.access_token }
       }
       const phone = normalizePhone(p.phone)
       const wa = normalizePhone(p.whatsapp || p.phone)
@@ -250,7 +251,7 @@ export function createDemoApi() {
       do { db.counters[yy] = (db.counters[yy] || 0) + 1; num = `PT-${db.counters[yy]}-${yy}` } while (db.orders.some((x) => x.order_number === num))
       const zone = db.delivery_zones.find((z) => z.name === q.zone)
       const o = { id: uid(), order_number: num, idempotency_key: p.idempotency_key || null, customer_id: c.id, customer_name: p.name.trim(), phone, whatsapp: wa, email: p.email || null,
-        customer_state: c.state || null, customer_city: c.city || null,
+        customer_state: c.state || null, customer_city: c.city || null, access_token: newToken(),
         status, payment_status: 'not_paid', payment_method: method, items: q.items, subtotal: q.subtotal, delivery_charge: q.delivery_charge, discount: 0, total: q.total,
         advance_due: q.advance_due, amount_paid: 0, is_custom: isCustom, quote_status: isCustom ? 'pending' : 'n/a', quote_note: null, fulfilment: p.fulfilment,
         address: p.fulfilment !== 'pickup' ? p.address : null, zone_id: zone?.id || null, needs_delivery_approval: needsZone, requested_date: p.date, slot_id: slot.id,
@@ -263,7 +264,7 @@ export function createDemoApi() {
         db.occasions.push({ id: uid(), customer_id: c.id, kind: p.occasion || 'Other', person_name: p.occasion_person || null, occasion_date: p.occasion_date, repeats: true,
           preferred_flavour: q.items[0]?.flavour, last_order_id: o.id, source: 'checkout', created_at: nowISO() })
       save()
-      return { order_number: num, status, total: o.total, advance_due: o.advance_due, subtotal: o.subtotal, delivery_charge: o.delivery_charge, is_custom: isCustom, needs_delivery_approval: needsZone, duplicate: false }
+      return { order_number: num, status, total: o.total, advance_due: o.advance_due, subtotal: o.subtotal, delivery_charge: o.delivery_charge, is_custom: isCustom, needs_delivery_approval: needsZone, duplicate: false, link_token: o.access_token }
     },
     async uploadFile(kind, file) {
       // demo: keep a small data-URL copy in this browser
@@ -276,6 +277,13 @@ export function createDemoApi() {
       const o = db.orders.find((x) => x.order_number === String(number).trim().toUpperCase() && x.phone === normalizePhone(phone))
       if (!o) err('NOT_FOUND: we could not find an order with that number and mobile')
       return clone(view(db, o))
+    },
+    async getOrderByLink(token) {
+      await sleep(150)
+      const db = load()
+      const o = db.orders.find((x) => x.access_token && x.access_token === String(token || '').trim())
+      if (!o) err('NOT_FOUND: this order link is not valid')
+      return clone({ ...view(db, o), phone: o.phone })
     },
     async getOrdersByPhone(phone) {
       await sleep(200)

@@ -277,6 +277,10 @@ create table if not exists public.orders (
 );
 alter table public.orders add column if not exists customer_state text;
 alter table public.orders add column if not exists customer_city text;
+-- private link token: lets the customer open their order by tapping a link (no typing)
+alter table public.orders add column if not exists access_token text default substr(replace(gen_random_uuid()::text, '-', ''), 1, 14);
+update public.orders set access_token = substr(replace(gen_random_uuid()::text, '-', ''), 1, 14) where access_token is null;
+create unique index if not exists orders_access_token_idx on public.orders (access_token);
 create index if not exists orders_phone_idx on public.orders (phone);
 create index if not exists orders_date_idx on public.orders (coalesce(confirmed_date, requested_date));
 create index if not exists orders_status_idx on public.orders (status);
@@ -674,7 +678,7 @@ begin
   if p ->> 'idempotency_key' is not null then
     select * into o from orders where idempotency_key = p ->> 'idempotency_key';
     if found then
-      return jsonb_build_object('order_number', o.order_number, 'duplicate', true, 'total', o.total, 'advance_due', o.advance_due, 'status', o.status);
+      return jsonb_build_object('order_number', o.order_number, 'duplicate', true, 'total', o.total, 'advance_due', o.advance_due, 'status', o.status, 'link_token', o.access_token);
     end if;
   end if;
 
@@ -811,7 +815,7 @@ begin
 
   return jsonb_build_object('order_number', o.order_number, 'status', o.status, 'total', o.total,
     'advance_due', o.advance_due, 'subtotal', o.subtotal, 'delivery_charge', o.delivery_charge,
-    'is_custom', o.is_custom, 'needs_delivery_approval', o.needs_delivery_approval, 'duplicate', false);
+    'is_custom', o.is_custom, 'needs_delivery_approval', o.needs_delivery_approval, 'duplicate', false, 'link_token', o.access_token);
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -843,7 +847,7 @@ language sql stable security definer set search_path = public as $$
     'balance', o.total - o.amount_paid, 'is_custom', o.is_custom, 'quote_status', o.quote_status, 'quote_note', o.quote_note,
     'fulfilment', o.fulfilment, 'address', o.address, 'requested_date', o.requested_date, 'slot_label', o.slot_label,
     'confirmed_date', o.confirmed_date, 'confirmed_slot_label', o.confirmed_slot_label,
-    'needs_delivery_approval', o.needs_delivery_approval, 'created_at', o.created_at,
+    'needs_delivery_approval', o.needs_delivery_approval, 'created_at', o.created_at, 'link_token', o.access_token,
     'history', (select coalesce(jsonb_agg(jsonb_build_object('to', h.to_status, 'at', h.created_at) order by h.created_at), '[]')
                   from order_status_history h where h.order_id = o.id),
     'payments', (select coalesce(jsonb_agg(jsonb_build_object('kind', y.kind, 'method', y.method, 'amount', y.amount, 'status', y.status, 'at', y.created_at) order by y.created_at), '[]')
@@ -865,6 +869,18 @@ begin
 end $$;
 
 -- Track by mobile number only: list that number's orders (no address shown)
+-- Open an order from its private link (the token is long and random, so it can't be guessed)
+create or replace function public.get_order_by_link(p_token text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare o orders;
+begin
+  if coalesce(length(trim(p_token)), 0) < 12 then return jsonb_build_object('error', 'NOT_FOUND: this order link is not valid'); end if;
+  select * into o from orders where access_token = trim(p_token);
+  if not found then return jsonb_build_object('error', 'NOT_FOUND: this order link is not valid'); end if;
+  return order_public_view(o) || jsonb_build_object('phone', o.phone);
+end $$;
+grant execute on function public.get_order_by_link(text) to anon, authenticated;
+
 -- (Privacy) There is deliberately NO way to list orders by mobile number alone.
 drop function if exists public.get_orders_by_phone(text);
 

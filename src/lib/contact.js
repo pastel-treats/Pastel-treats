@@ -53,3 +53,6 @@ export function callsToday(s, now = new Date()) {
   return !off.includes(dow)
 }
 export const NO_CALL_NOTE = 'Sundays are app & WhatsApp only — no calls, please.'
+
+// Private order link (opens the order by tapping — no Order ID or mobile to type)
+export const orderLink = (token) => (token ? `${location.origin}${location.pathname}#/o/${token}` : null)

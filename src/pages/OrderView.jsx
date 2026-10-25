@@ -5,7 +5,7 @@ import PhoneInput from '../components/PhoneInput.jsx'
 import { useStore } from '../store.jsx'
 import { api } from '../api/index.js'
 import { inr, cleanError, itemSummary, statusLabel, STATUS_FLOW } from '../lib/format.js'
-import { upiLink, waLink, normalizePhone, telLink, prettyPhone, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
+import { upiLink, waLink, normalizePhone, telLink, prettyPhone, callsToday, NO_CALL_NOTE, orderLink } from '../lib/contact.js'
 import { cancellationTerms } from '../lib/cancellation.js'
 import { fmtDate, fmtDateTime } from '../lib/dates.js'
 import { Icon, Spinner, Field, StatusBadge, PayBadge, compressImage, ACCEPT_IMG, WaIcon } from '../components/ui.jsx'
@@ -153,6 +153,21 @@ export function OrderDetails({ o }) {
   )
 }
 
+// Copy / share the private order link
+function LinkBox({ token }) {
+  const { toast } = useStore()
+  const url = orderLink(token)
+  return (
+    <div className="link-box">
+      <div className="grow"><b className="small">Your private order link</b><div className="tiny muted">Open your order any time by tapping it — no typing. Don’t share it with others.</div></div>
+      <div className="row" style={{ gap: 6 }}>
+        <button type="button" className="btn btn-white btn-sm" onClick={() => { navigator.clipboard?.writeText(url); toast('Link copied') }}><Icon name="copy" size={15} /> Copy</button>
+        {typeof navigator !== 'undefined' && navigator.share && <button type="button" className="btn btn-soft btn-sm" onClick={() => navigator.share({ title: 'My Pastel Treats order', url }).catch(() => {})}>Share</button>}
+      </div>
+    </div>
+  )
+}
+
 // The full order as a WhatsApp message to the baker
 function orderMessage(o, phone) {
   const when = `${fmtDate(o.confirmed_date || o.requested_date, { weekday: true })}, ${o.confirmed_slot_label || o.slot_label}`
@@ -164,6 +179,7 @@ function orderMessage(o, phone) {
     `${o.fulfilment === 'pickup' ? 'Pickup' : 'Courier dispatch'}: ${when}`,
     ...o.items.map((i) => `• ${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}${itemSummary(i) ? ' (' + itemSummary(i) + ')' : ''}${i.message ? ' — message: "' + i.message + '"' : ''}`),
     `Total: ${inr(o.total)} · Advance: ${inr(o.advance_due)}`,
+    ...(o.link_token ? [`My order link: ${orderLink(o.link_token)}`] : []),
   ].join('\n')
 }
 
@@ -186,7 +202,7 @@ export default function OrderView() {
       rememberOrder({
         number, phone: normalizePhone(ph), at: known?.at || r.created_at || new Date().toISOString(),
         items: (r.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '),
-        total: r.total, date: r.confirmed_date || r.requested_date, status: r.status, fulfilment: r.fulfilment,
+        total: r.total, date: r.confirmed_date || r.requested_date, status: r.status, fulfilment: r.fulfilment, link_token: r.link_token,
       })
     } catch (e) { setErr(cleanError(e)) } finally { setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,12 +242,14 @@ export default function OrderView() {
           <div className="card flat" style={{ margin: '12px auto 0', maxWidth: 360, background: '#fff' }}>
             <div className="tiny muted">Order ID</div>
             <div className="serif" style={{ fontSize: '1.7rem', fontWeight: 700, color: 'var(--forest)', letterSpacing: '0.02em' }}>{o.order_number}</div>
-            <div className="small muted">Mobile {prettyPhone(phone || known?.phone)} · save this to track your order</div>
+            <div className="small muted">Mobile {prettyPhone(phone || known?.phone)}</div>
           </div>
           {s.whatsapp && <a className="btn btn-primary" style={{ marginTop: 12 }} href={waLink(s.whatsapp, orderMessage(o, phone || known?.phone))} target="_blank" rel="noreferrer"><WaIcon size={18} /> Send my order details on WhatsApp</a>}
           <p className="small" style={{ margin: '4px 0 0' }}>{o.status === 'awaiting_payment' ? 'Pay the advance below to secure your slot.' : 'The baker will review it and message you on WhatsApp.'}</p>
+          <p className="tiny muted" style={{ margin: '6px 0 0' }}>Sending it on WhatsApp also keeps your <b>private order link</b> in the chat — tap it any time to check your order.</p>
         </div>
       )}
+      {!isNew && o.link_token && <LinkBox token={o.link_token} />}
       <div className="row between wrap" style={{ marginBottom: 12 }}>
         <div><div className="eyebrow">Order ID</div><h1 style={{ fontSize: '2.2rem' }}>{o.order_number}</h1><div className="small muted">Mobile {prettyPhone(phone || known?.phone)}</div></div>
         <div className="row"><StatusBadge s={o.status} short={false} /><PayBadge s={o.payment_status} /></div>
