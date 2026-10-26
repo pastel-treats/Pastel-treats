@@ -139,6 +139,8 @@ function setStatusRaw(db, o, status, note) {
 }
 
 let cache = null
+// another tab (e.g. the shop) placed an order → read the fresh copy next time
+if (typeof window !== 'undefined') window.addEventListener('storage', (e) => { if (e.key === KEY) cache = null })
 function load() {
   if (cache) return cache
   try { cache = JSON.parse(localStorage.getItem(KEY) || 'null') } catch { cache = null }

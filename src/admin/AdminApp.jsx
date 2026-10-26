@@ -19,6 +19,7 @@ import Settings from './Settings.jsx'
 import Team, { DataExport } from './Team.jsx'
 import Announcements from './Announcements.jsx'
 import Reviews from './Reviews.jsx'
+import OrderAlerts from './OrderAlerts.jsx'
 
 const ACtx = createContext(null)
 export const useAdmin = () => useContext(ACtx)
@@ -230,6 +231,7 @@ function Shell() {
           ))}
         </nav>
         <main className="admin-main">
+          <OrderAlerts />
           <Routes>
             <Route index element={<Overview />} />
             <Route path="tasks" element={<Tasks />} />
