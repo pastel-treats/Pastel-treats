@@ -26,10 +26,11 @@ export default function ProductCard({ p }) {
           {flv > 1 && ` · ${flv} flavours`}
         </div>
         <div className="price">
-          {p.unit_label === 'each' ? <>{inr(p.base_price)} <small>each · min {p.min_qty || 1}</small></>
+          {p.enquiry_only ? (p.base_price ? <><small>from </small>{inr(p.base_price)}</> : <small>Price on request</small>)
+            : p.unit_label === 'each' ? <>{inr(p.base_price)} <small>each · min {p.min_qty || 1}</small></>
             : <>{(hasChoices(p) || p.pricing_mode === 'per_kg') && <small>from </small>}{inr(startingPrice(p))}{p.pricing_mode === 'per_kg' && <small> /kg</small>}</>}
         </div>
-        <div className="cta">{p.is_available ? 'Customise & order →' : 'Currently unavailable'}</div>
+        <div className="cta">{!p.is_available ? 'Currently unavailable' : p.enquiry_only ? 'Message to order →' : 'Customise & order →'}</div>
       </div>
     </Link>
   )

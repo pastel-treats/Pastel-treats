@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store.jsx'
 import ProductCard from '../components/ProductCard.jsx'
@@ -9,6 +9,38 @@ import { activeAnnouncements, KINDS } from '../lib/announcements.js'
 import { fmtDate } from '../lib/dates.js'
 import { LocationCard, MeetBaker } from './Info.jsx'
 import { InstallBanner } from './GetApp.jsx'
+import { api } from '../api/index.js'
+
+const KITCHEN = [
+  ['images/ai-kitchen-combi-oven.svg', 'Unox combi oven', 'Professional Italian oven with steam and even heat — the secret behind our soft sponges and crisp choux.'],
+  ['images/ai-kitchen-mixer-green.svg', 'KitchenAid stand mixer · pastel green', 'Silky buttercream, airy mousse and perfect meringue, whipped by a pro mixer.'],
+  ['images/ai-kitchen-mixer-red.svg', 'KitchenAid stand mixer · red', 'Our second mixer, so dough and cream never wait — every batch made fresh.'],
+]
+
+// Approved reviews only (the baker picks them in the dashboard)
+function Reviews() {
+  const [list, setList] = useState(null)
+  useEffect(() => { api.publicReviews?.().then(setList).catch(() => setList([])) }, [])
+  if (!list?.length) return null
+  return (
+    <section className="section" style={{ background: 'var(--ivory)' }}>
+      <div className="wrap">
+        <div className="eyebrow">Real orders, real people</div>
+        <h2 style={{ marginBottom: 18 }}>What our customers say</h2>
+        <div className="reviews">
+          {list.slice(0, 9).map((r) => (
+            <figure key={r.order_number} className="review">
+              <div className="stars" aria-label={`${r.rating} out of 5 stars`}>{'★'.repeat(r.rating)}<span className="off">{'★'.repeat(5 - r.rating)}</span></div>
+              <blockquote>“{r.body}”</blockquote>
+              <figcaption><b>{r.name}</b><span className="tiny muted">{fmtDate(String(r.at).slice(0, 10), { year: true })} · Order {r.order_number} <span className="verified">✓ Verified order</span></span></figcaption>
+            </figure>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 
 const CAT_TINTS = ['#ffebf4', '#bfebef', '#ffec9d', '#ffdac1', '#eafeb4', '#d9efe6']
 const OCCASIONS = [
@@ -18,11 +50,15 @@ const OCCASIONS = [
 
 export default function Home() {
   const { data, settings: s } = useStore()
-  const featured = data.products.filter((p) => p.is_active && p.is_featured)
+  const featured = data.products.filter((p) => p.is_active && p.is_featured && !p.enquiry_only)
   const cats = data.categories.filter((c) => c.visible)
   const custom = data.products.find((p) => p.is_active && /custom/i.test(p.name))
   const [h1a, ...rest] = (s.hero_headline || '').split(',')
   const news = activeAnnouncements(s)
+  const catOf = (slug) => data.categories.find((c) => c.slug === slug)
+  const inCat = (slug) => { const c = catOf(slug); return c ? data.products.filter((p) => p.is_active && p.category_id === c.id) : [] }
+  const hampers = inCat('hampers')
+  const seasonal = inCat('seasonal')
 
   return (
     <>
@@ -83,6 +119,28 @@ export default function Home() {
         </div>
       </section>
 
+      {hampers.length > 0 && (
+        <section className="section hamper-band">
+          <div className="wrap">
+            <div className="row between" style={{ marginBottom: 18, alignItems: 'flex-end' }}>
+              <div><div className="eyebrow">Gifting</div><h2>Gift hampers</h2><p className="muted" style={{ margin: '6px 0 0' }}>Festivals, corporate gifts, store openings and brand launches — made to your budget.</p></div>
+              <Link to="/menu/hampers" className="btn btn-full-menu">All hampers <Icon name="right" size={18} /></Link>
+            </div>
+            <div className="grid-products">{hampers.map((p) => <ProductCard key={p.id} p={p} />)}</div>
+          </div>
+        </section>
+      )}
+
+      {seasonal.length > 0 && (
+        <section className="section">
+          <div className="wrap">
+            <div className="eyebrow">Only for a while</div>
+            <h2 style={{ marginBottom: 18 }}>Seasonal treats</h2>
+            <div className="grid-products">{seasonal.map((p) => <ProductCard key={p.id} p={p} />)}</div>
+          </div>
+        </section>
+      )}
+
       <section className="section" style={{ background: 'var(--ivory)' }}>
         <div className="wrap">
           <div className="eyebrow">Browse</div>
@@ -124,6 +182,25 @@ export default function Home() {
               <Link key={n} to={n === 'For all occasions' ? '/menu' : `/menu?occasion=${encodeURIComponent(n)}`} className="occ" style={{ background: bg, boxShadow: 'var(--shadow)' }}>
                 <div className="ico" aria-hidden="true">{ico}</div><div className="n">{n}</div>
               </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <Reviews />
+
+      <section className="section kitchen">
+        <div className="wrap">
+          <div className="eyebrow">Our kitchen</div>
+          <h2>Baked with the best equipment</h2>
+          <p className="muted" style={{ margin: '6px 0 18px', maxWidth: 640 }}>A professional kitchen at home: the same ovens and mixers used by top patisseries, so every bake comes out just right.</p>
+          <div className="kitchen-grid">
+            {KITCHEN.map(([img, t, d]) => (
+              <figure key={t} className="kit">
+                <img src={img} alt={t} loading="lazy" />
+                <figcaption><b>{t}</b><span className="small muted">{d}</span></figcaption>
+                <span className="ai-tag">Illustration</span>
+              </figure>
             ))}
           </div>
         </div>

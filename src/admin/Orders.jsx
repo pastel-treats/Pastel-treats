@@ -41,7 +41,9 @@ export function OrderDrawer({ id, onClose }) {
   const [price, setPrice] = useState(() => ({ delivery_charge: o?.delivery_charge || 0, discount: o?.discount || 0, subtotal: o?.subtotal || 0, quote_note: o?.quote_note || '', reason: '' }))
   const [pay, setPay] = useState({ kind: 'advance', method: 'upi', amount: '', reference: '' })
   const [notes, setNotes] = useState(o?.admin_notes || '')
-  const [prompt, setPrompt] = useState(null) // WhatsApp follow-up suggestion
+  // WhatsApp follow-up suggestion — a brand-new order first offers the "Order placed, awaiting confirmation" message
+  const [prompt, setPrompt] = useState(() => (o && ['submitted', 'awaiting_payment', 'payment_verification'].includes(o.status)
+    && !db.notification_log.some((n) => n.order_id === o.id && /^received-/.test(n.template)) ? 'received' : null))
   const [cancelling, setCancelling] = useState(false)
   if (!o) return null
   const payments = db.payments.filter((p) => p.order_id === o.id)

@@ -277,6 +277,9 @@ create table if not exists public.orders (
 );
 alter table public.orders add column if not exists customer_state text;
 alter table public.orders add column if not exists customer_city text;
+-- products that are ordered by messaging the baker (hampers, seasonal, price on request)
+alter table public.products add column if not exists enquiry_only boolean not null default false;
+
 -- private link token: lets the customer open their order by tapping a link (no typing)
 alter table public.orders add column if not exists access_token text default substr(replace(gen_random_uuid()::text, '-', ''), 1, 14);
 update public.orders set access_token = substr(replace(gen_random_uuid()::text, '-', ''), 1, 14) where access_token is null;
@@ -326,6 +329,20 @@ create table if not exists public.notification_log (
   created_by uuid,
   created_at timestamptz not null default now()
 );
+
+-- Customer reviews: only someone holding a real order's private link can write one (one per order).
+-- They stay hidden until the baker approves them in the dashboard.
+create table if not exists public.reviews (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null unique references public.orders(id) on delete cascade,
+  rating int not null check (rating between 1 and 5),
+  body text not null check (length(body) between 3 and 600),
+  display_name text,
+  approved boolean not null default false,
+  approved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists reviews_approved_idx on public.reviews (approved, created_at desc);
 
 create table if not exists public.audit_logs (
   id bigserial primary key,
@@ -580,6 +597,7 @@ begin
   select * into p from products where id = (it ->> 'product_id')::uuid;
   if not found or not p.is_active then raise exception 'ITEM_UNAVAILABLE: a selected item is no longer on the menu'; end if;
   if not p.is_available then raise exception 'ITEM_UNAVAILABLE: % is currently unavailable', p.name; end if;
+  if p.enquiry_only then raise exception 'INVALID: please message us on WhatsApp to order %', p.name; end if;
   qty := greatest(coalesce((it ->> 'qty')::int, 1), 1);
   if qty > p.max_qty then raise exception 'INVALID: maximum quantity for % is %', p.name, p.max_qty; end if;
   if qty < p.min_qty then raise exception 'INVALID: minimum order for % is %', p.name, p.min_qty; end if;
@@ -706,6 +724,9 @@ begin
   if v_method = 'cash' and coalesce(s ->> 'cash_for', 'both') = 'balance' then
     raise exception 'INVALID: the advance must be paid online/UPI; cash is accepted for the balance only';
   end if;
+  if v_method = 'cash' and p ->> 'fulfilment' = 'courier' then
+    raise exception 'INVALID: courier orders are paid by UPI';
+  end if;
   if v_method = 'cash' then
     if p ->> 'fulfilment' = 'pickup' and not coalesce((s ->> 'cash_pickup')::boolean, false) then raise exception 'INVALID: cash is not available for pickup orders'; end if;
     if p ->> 'fulfilment' = 'delivery' and not coalesce((s ->> 'cash_delivery')::boolean, false) then raise exception 'INVALID: cash is not available for delivery orders'; end if;
@@ -736,15 +757,24 @@ begin
 
   -- date & slot validation on the SERVER clock (device clock is never trusted)
   d := (p ->> 'date')::date;
-  select * into slot from time_slots where id = (p ->> 'slot_id')::uuid and active;
-  if not found then raise exception 'SLOT_UNAVAILABLE: please choose a time slot'; end if;
+  -- courier orders only need a dispatch date; pickup/delivery need a time slot
+  if p ->> 'fulfilment' = 'courier' and nullif(p ->> 'slot_id', '') is null then
+    slot := null;
+  else
+    select * into slot from time_slots where id = (p ->> 'slot_id')::uuid and active;
+    if not found then raise exception 'SLOT_UNAVAILABLE: please choose a time slot'; end if;
+  end if;
 
   perform pg_advisory_xact_lock(hashtext('pt-day-' || d::text));   -- serialise bookings for the day
 
   select array_agg((x ->> 'product_id')::uuid) into prod_ids from jsonb_array_elements(q -> 'items') x;
   avail := get_availability(d, d, prod_ids, p ->> 'fulfilment');
-  select (x ->> 'eligible')::boolean into slot_ok
-    from jsonb_array_elements(avail #> '{days,0,slots}') x where (x ->> 'id')::uuid = slot.id;
+  if slot.id is null then
+    slot_ok := coalesce((avail #>> '{days,0,available}')::boolean, false);
+  else
+    select (x ->> 'eligible')::boolean into slot_ok
+      from jsonb_array_elements(avail #> '{days,0,slots}') x where (x ->> 'id')::uuid = slot.id;
+  end if;
   if not coalesce(slot_ok, false) then
     raise exception 'SLOT_UNAVAILABLE: that date/time is no longer available (please order % hrs prior). Please pick another slot.', avail ->> 'lead_hours';
   end if;
@@ -753,7 +783,7 @@ begin
   select * into cust from customers where customers.phone = v_phone;
   if not found then
     insert into customers(name, phone, whatsapp, email, state, city, marketing_consent, consent_at)
-    values (trim(p ->> 'name'), v_phone, v_wa, nullif(trim(p ->> 'email'), ''),
+    values (upper(trim(p ->> 'name')), v_phone, v_wa, nullif(trim(p ->> 'email'), ''),
             nullif(left(trim(coalesce(p ->> 'state', '')), 60), ''), nullif(left(trim(coalesce(p ->> 'city', '')), 60), ''),
             coalesce((p ->> 'marketing_consent')::boolean, false),
             case when coalesce((p ->> 'marketing_consent')::boolean, false) then now() end)
@@ -795,12 +825,12 @@ begin
     payment_method, items, subtotal, delivery_charge, total, advance_due, is_custom, quote_status,
     fulfilment, address, zone_id, needs_delivery_approval, requested_date, slot_id, slot_label,
     alt_date, alt_slot_label, occasion, occasion_date, notes, reference_images)
-  values (num, p ->> 'idempotency_key', cust.id, trim(p ->> 'name'), v_phone, v_wa, nullif(trim(p ->> 'email'), ''), v_status,
+  values (num, p ->> 'idempotency_key', cust.id, upper(trim(p ->> 'name')), v_phone, v_wa, nullif(trim(p ->> 'email'), ''), v_status,
     v_method, q -> 'items', (q ->> 'subtotal')::int, (q ->> 'delivery_charge')::int, (q ->> 'total')::int, (q ->> 'advance_due')::int,
     v_custom, case when v_custom then 'pending' else 'n/a' end,
     p ->> 'fulfilment', case when p ->> 'fulfilment' in ('delivery','courier') then p -> 'address' end,
     (select id from delivery_zones where active and regexp_replace(coalesce(p #>> '{address,pincode}', ''), '\s', '', 'g') = any(pincodes) limit 1),
-    needs_zone, d, slot.id, slot.label,
+    needs_zone, d, slot.id, coalesce(slot.label, case when p ->> 'fulfilment' = 'courier' then 'Courier dispatch' end),
     nullif(p ->> 'alt_date', '')::date, nullif(p ->> 'alt_slot_label', ''),
     nullif(p ->> 'occasion', ''), nullif(p ->> 'occasion_date', '')::date, left(p ->> 'notes', 1000), refs)
   returning * into o;
@@ -848,6 +878,7 @@ language sql stable security definer set search_path = public as $$
     'fulfilment', o.fulfilment, 'address', o.address, 'requested_date', o.requested_date, 'slot_label', o.slot_label,
     'confirmed_date', o.confirmed_date, 'confirmed_slot_label', o.confirmed_slot_label,
     'needs_delivery_approval', o.needs_delivery_approval, 'created_at', o.created_at, 'link_token', o.access_token,
+    'review', (select jsonb_build_object('rating', r.rating, 'body', r.body, 'approved', r.approved, 'at', r.created_at) from reviews r where r.order_id = o.id),
     'history', (select coalesce(jsonb_agg(jsonb_build_object('to', h.to_status, 'at', h.created_at) order by h.created_at), '[]')
                   from order_status_history h where h.order_id = o.id),
     'payments', (select coalesce(jsonb_agg(jsonb_build_object('kind', y.kind, 'method', y.method, 'amount', y.amount, 'status', y.status, 'at', y.created_at) order by y.created_at), '[]')
@@ -880,6 +911,38 @@ begin
   return order_public_view(o) || jsonb_build_object('phone', o.phone);
 end $$;
 grant execute on function public.get_order_by_link(text) to anon, authenticated;
+
+-- Reviews: written from the order's private link, shown only after the baker approves
+create or replace function public.submit_review(p_token text, p_rating int, p_body text) returns jsonb
+language plpgsql volatile security definer set search_path = public as $$
+declare o orders; d date;
+begin
+  perform rate_limit('review:' || coalesce(trim(p_token), ''), 5, interval '10 minutes');
+  if coalesce(length(trim(p_token)), 0) < 12 then return jsonb_build_object('error', 'NOT_FOUND: this order link is not valid'); end if;
+  select * into o from orders where access_token = trim(p_token);
+  if not found then return jsonb_build_object('error', 'NOT_FOUND: this order link is not valid'); end if;
+  d := coalesce(o.confirmed_date, o.requested_date);
+  if o.status not in ('advance_received','confirmed','in_preparation','ready','out_for_delivery','completed')
+     or (o.status <> 'completed' and d > (now() at time zone 'Asia/Kolkata')::date) then
+    raise exception 'INVALID: you can review once your order has been handed over';
+  end if;
+  if p_rating is null or p_rating not between 1 and 5 then raise exception 'INVALID: please choose 1 to 5 stars'; end if;
+  if length(trim(coalesce(p_body, ''))) < 3 then raise exception 'INVALID: please write a few words'; end if;
+  if exists (select 1 from reviews where order_id = o.id) then raise exception 'INVALID: you have already reviewed this order — thank you!'; end if;
+  insert into reviews(order_id, rating, body, display_name)
+  values (o.id, p_rating, left(trim(p_body), 600), initcap(split_part(trim(o.customer_name), ' ', 1)));
+  return order_public_view(o);
+end $$;
+
+-- Approved reviews for the home page: first name, stars, words, date and order number
+create or replace function public.get_public_reviews() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(x order by x->>'at' desc), '[]') from (
+    select jsonb_build_object('name', r.display_name, 'rating', r.rating, 'body', r.body, 'at', r.created_at, 'order_number', o.order_number) x
+    from reviews r join orders o on o.id = r.order_id where r.approved order by r.created_at desc limit 30) t
+$$;
+grant execute on function public.submit_review(text, int, text) to anon, authenticated;
+grant execute on function public.get_public_reviews() to anon, authenticated;
 
 -- (Privacy) There is deliberately NO way to list orders by mobile number alone.
 drop function if exists public.get_orders_by_phone(text);
@@ -997,7 +1060,7 @@ grant execute on function public.admin_set_status(uuid, text, text) to authentic
 do $$ declare t text; begin
   foreach t in array array['settings','admins','categories','products','addons','time_slots','blackout_dates','delivery_zones',
                            'customers','customer_addresses','occasions','orders','order_status_history','payments',
-                           'notification_log','audit_logs','lookup_attempts'] loop
+                           'notification_log','audit_logs','lookup_attempts','reviews'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists admin_all on public.%I', t);
     execute format('create policy admin_all on public.%I for all to authenticated using (public.is_admin()) with check (public.is_admin())', t);

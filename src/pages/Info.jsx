@@ -34,7 +34,7 @@ export function MeetBaker() {
         {s.baker_name && <div className="baker-name serif">{s.baker_name}</div>}
         <div className="small" style={{ color: 'var(--forest)', fontWeight: 600 }}>{s.baker_title || 'Certified pastry chef'}</div>
         <p className="serif" style={{ fontSize: '1.45rem', lineHeight: 1.3, color: 'var(--forest)', margin: '6px 0 10px' }}>{s.baker_intro}</p>
-        {s.instagram && <a className="btn btn-soft btn-sm" href={s.instagram} target="_blank" rel="noreferrer"><Icon name="insta" size={16} /> See my bakes on Instagram</a>}
+        {s.instagram && <a className="btn-insta" href={s.instagram} target="_blank" rel="noreferrer"><span className="ig"><Icon name="insta" size={20} /></span> See my bakes on Instagram <Icon name="right" size={16} /></a>}
       </div>
     </div>
   )

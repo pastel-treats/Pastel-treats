@@ -85,6 +85,8 @@ export const SEED_CATEGORIES = [
   { slug: 'desserts', name: 'Desserts', description: 'Tres leches, tiramisu, mud pie & more', sort: 5 },
   { slug: 'bakes', name: 'Buns & bakes', description: 'Korean buns, bundt cakes, cinnamon rolls', sort: 6 },
   { slug: 'healthy', name: 'Healthy bites', description: 'Protein bakes, granola & ragi', sort: 7 },
+  { slug: 'seasonal', name: 'Seasonal treats', description: 'Here for a season — ice creams, mango sticky rice & more', sort: 8 },
+  { slug: 'hampers', name: 'Gift hampers', description: 'Festive, corporate, store-opening & brand-launch hampers', sort: 9 },
 ]
 
 const CAKE_SIZES = [
@@ -174,7 +176,7 @@ export const SEED_PRODUCTS = [
   },
   // ---- cookies & bars ----
   {
-    cat: 'cookies-bars', name: 'New York Chunky Cookie', featured: true, ...each(4), images: ['images/chunky-cookies.webp'],
+    cat: 'cookies-bars', name: 'New York Chunky Cookie', featured: true, ...each(4),  images: ['images/chunky-cookies.webp'],
     description: 'Thick bakery-style cookies with crisp edges and molten middles. ₹150 each, minimum 4.',
     base_price: 150,
     flavours: [
@@ -214,7 +216,82 @@ export const SEED_PRODUCTS = [
     flavours: [{ name: 'Protein brownie', price: 0 }, { name: 'Protein cookie', price: 0 }], allow_message: false,
   },
   { cat: 'healthy', name: 'Granola', unit: '100 g', images: ['images/ai-granola.svg'], description: 'House-made granola. ₹250 for 100 g.', base_price: 250, allow_message: false },
+  // ---- seasonal (message to order) ----
+  { cat: 'seasonal', name: 'Ice Cream', unit: 'tub', images: ['images/ai-ice-cream.svg'], base_price: 0, enquiry_only: true, seasonal_note: 'Seasonal', allow_message: false },
+  { cat: 'seasonal', name: 'Mango Sticky Rice', unit: 'bowl', images: ['images/ai-mango-sticky-rice.svg'], base_price: 0, enquiry_only: true, seasonal_note: 'Mango season', allow_message: false },
+  // ---- gift hampers (message to order) ----
+  { cat: 'hampers', name: 'Festival Hamper (Diwali & more)', featured: true, unit: 'hamper', images: ['images/ai-hamper-festival.svg'], base_price: 0, enquiry_only: true, seasonal_note: 'Diwali', allow_message: false, occasions: ['Festival'] },
+  { cat: 'hampers', name: 'Corporate Gift Hamper', unit: 'hamper', images: ['images/ai-hamper-corporate.svg'], base_price: 0, enquiry_only: true, allow_message: false, occasions: ['Corporate'] },
+  { cat: 'hampers', name: 'Store Opening Hamper', unit: 'hamper', images: ['images/ai-hamper-store-opening.svg'], base_price: 0, enquiry_only: true, allow_message: false, occasions: ['Corporate'] },
+  { cat: 'hampers', name: 'Brand Launch Hamper', unit: 'hamper', images: ['images/ai-hamper-brand-launch.svg'], base_price: 0, enquiry_only: true, allow_message: false, occasions: ['Corporate'] },
 ]
+
+// Menu descriptions (also pushed to the live menu by migration 009, matched by name).
+export const DESCRIPTIONS = {
+  'Celebration Cake':
+    'Our signature celebration cake — soft, moist sponge layered with fresh buttercream and hand-finished in the colours of your party. Pick a flavour and size; prices are per kg. Custom designs are quoted by us.',
+  'Custom Design Cake':
+    'Dream it, we bake it. Share your theme or a reference picture and Vaishnavi designs a one-of-a-kind cake around it — from dreamy pastels to bold characters. The flavour price is the starting rate; we quote the design before you pay.',
+  'Brownie Box':
+    'Dense, fudgy brownies with that shiny crackle top, made with Callebaut chocolate. Pick a flavour or go assorted — perfect for gifting, and sturdy enough to courier.',
+  'Blondie Box':
+    'The golden cousin of the brownie — buttery, chewy blondies with deep caramel notes and a melt-in-the-mouth centre. Gift-ready, and can be couriered.',
+  'Cookie Box':
+    'Eight crisp-edged, buttery cookies baked fresh to order. Choose one flavour or ask for an assorted box — a little box of happiness that travels well by courier.',
+  'Ragi Cocoa Puff':
+    'Crunchy finger-millet puffs coated in real cocoa — the snack you can feel good about. Light, crispy and loved by kids and grown-ups alike.',
+  'Choux Pastry':
+    'Light-as-air French choux with a crackly craquelin top, piped full of chilled, silky cream. Bite-sized elegance for your dessert table. Minimum 4.',
+  'Sweet Tart':
+    'Crisp, buttery shortcrust filled with fresh fruit and crème pâtissière, silky chocolate ganache or gooey salted caramel. Mix flavours with an assorted box. Minimum 4.',
+  'Savoury Tart':
+    'Flaky, golden tart shells with a rich, savoury filling — the perfect tea-time bite and party starter. Minimum 4.',
+  'Entremet (single serve)':
+    'A patisserie-style mousse cake for one — layers of mousse, crunch and sponge under a glossy mirror glaze. Nine flavours, from triple chocolate to tender coconut lychee. Minimum 4.',
+  'New York Chunky Cookie':
+    'Thick, bakery-style New York cookies — crisp golden edges, a gooey molten middle and generous chunks in every bite. ₹150 each, minimum 4 pieces.',
+  'Newyork Chunky Cookies':
+    'Thick, bakery-style New York cookies — crisp golden edges, a gooey molten middle and generous chunks in every bite. ₹150 each, minimum 4 pieces.',
+  'Rocher Bomb':
+    'Everything you love about Ferrero Rocher in a cake bite — hazelnut-chocolate cake, Nutella centre and a crunchy chocolate-nut shell. Minimum 4.',
+  'Millionaire Shortbread':
+    'Three layers of pure indulgence — buttery shortbread, thick golden caramel and a snap of smooth chocolate on top. Minimum 8.',
+  'Tres Leches':
+    'A feather-light sponge soaked in three milks until it melts on your spoon, crowned with clouds of whipped cream. Cool, creamy and dangerously good.',
+  Tiramisu:
+    'The Italian classic — ladyfingers soaked in strong espresso, layered with velvety mascarpone cream and dusted with cocoa. Rich, light and perfectly balanced.',
+  'Chocolate Mud Pie':
+    'For serious chocolate lovers — a crunchy chocolate base, a deep, fudgy filling and a silky ganache finish. Half a kilo of pure joy to share.',
+  'Banana Pudding & Crumble Bowl':
+    'A comforting bowl of creamy pudding layered with soft fruit and buttery crumble. Choose classic banana pudding or a fruity crumble.',
+  Mochi:
+    'Soft, pillowy rice-dough mochi with a luscious creamy filling — chewy outside, dreamy inside. Flavours from Lotus Biscoff to Ferrero Rocher. Minimum 4.',
+  'Korean Cream Cheese Bun':
+    'The viral Korean garlic bun — a soft bun stuffed with sweet cream cheese and soaked in golden garlic butter. Savoury, sweet and irresistible. Minimum 4.',
+  'Bundt Cake':
+    'A tall, tender ring cake with a glossy glaze — carrot, lemon blueberry, red velvet or chocolate. Just right for tea time or a small celebration.',
+  'Cinnamon Rolls':
+    'Pillowy, swirled cinnamon rolls with a buttery brown-sugar filling and a soft cream-cheese glaze, best enjoyed warm.',
+  'Protein Brownie / Cookie':
+    'Guilt-free and gym-friendly — made with NO flour at all, just whey protein. Fudgy brownies and chewy cookies packed with protein, so you can treat yourself after a workout. Minimum 4.',
+  Granola:
+    'Crunchy, golden clusters of oats, nuts and seeds, slow-baked in small batches with honey. Perfect with milk, yoghurt or straight from the jar.',
+  'Turkish Milk Cake':
+    'Light, airy sponge soaked in cold milk and topped with a layer of caramelised sugar — Turkey\'s famous trileçe. Creamy, cool and melt-in-the-mouth, in 250 g tubs.',
+  'Ice Cream':
+    'Small-batch, homemade ice cream — rich, creamy and made with real ingredients. Seasonal flavours change often, so message us to see what\'s churning now.',
+  'Mango Sticky Rice':
+    'The Thai favourite — warm coconut sticky rice with sweet, ripe mango, salted coconut cream and a sprinkle of toasted sesame. Only while mangoes are in season.',
+  'Festival Hamper (Diwali & more)':
+    'Light up the festival with a hamper of handmade brownies, cookies and treats in beautiful gift packing — for family, friends and clients. Tell us your budget and quantity and we\'ll put it together.',
+  'Corporate Gift Hamper':
+    'Premium, handmade treat hampers for your team, clients and events — with your logo or a personal note. Bulk orders welcome; message us for options and pricing.',
+  'Store Opening Hamper':
+    'Make your opening day sweeter. Treat boxes and dessert tables for your guests, customised to your store\'s colours. Message us with the date and number of guests.',
+  'Brand Launch Hamper':
+    'Launching something new? We create custom treat boxes and dessert hampers in your brand colours, with your logo and message — the perfect PR package.',
+}
+SEED_PRODUCTS.forEach((p) => { if (DESCRIPTIONS[p.name]) p.description = DESCRIPTIONS[p.name] })
 
 export const SEED_ADDONS = []
 

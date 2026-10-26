@@ -7,7 +7,7 @@ import { api } from '../api/index.js'
 import { inr, cleanError, itemSummary, statusLabel, STATUS_FLOW } from '../lib/format.js'
 import { upiLink, waLink, normalizePhone, telLink, prettyPhone, callsToday, NO_CALL_NOTE, orderLink } from '../lib/contact.js'
 import { cancellationTerms } from '../lib/cancellation.js'
-import { fmtDate, fmtDateTime } from '../lib/dates.js'
+import { fmtDate, fmtDateTime, todayISO } from '../lib/dates.js'
 import { Icon, Spinner, Field, StatusBadge, PayBadge, compressImage, ACCEPT_IMG, WaIcon } from '../components/ui.jsx'
 
 function loadRazorpay() {
@@ -183,6 +183,44 @@ function orderMessage(o, phone) {
   ].join('\n')
 }
 
+// Review — only from a real order, once it has been handed over. Shown on the home page after the baker approves it.
+const REVIEWABLE = ['advance_received', 'confirmed', 'in_preparation', 'ready', 'out_for_delivery', 'completed']
+export function canReview(o) {
+  const d = o.confirmed_date || o.requested_date
+  return !!o.link_token && REVIEWABLE.includes(o.status) && (o.status === 'completed' || d <= todayISO())
+}
+function ReviewBox({ o, onDone }) {
+  const [rating, setRating] = useState(5)
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  if (o.review)
+    return (
+      <div className="card review-box">
+        <div className="card-title">Your review</div>
+        <div className="stars" aria-label={`${o.review.rating} stars`}>{'★'.repeat(o.review.rating)}<span className="off">{'★'.repeat(5 - o.review.rating)}</span></div>
+        <p style={{ margin: '6px 0' }}>“{o.review.body}”</p>
+        <p className="tiny muted" style={{ margin: 0 }}>{o.review.approved ? 'Thank you! Your review is on our home page.' : 'Thank you! It will appear on our home page once the baker has seen it.'}</p>
+      </div>
+    )
+  if (!canReview(o)) return null
+  async function send() {
+    setBusy(true); setErr(null)
+    try { onDone(await api.submitReview(o.link_token, rating, body)) } catch (e) { setErr(cleanError(e)) } finally { setBusy(false) }
+  }
+  return (
+    <div className="card review-box stack">
+      <div><div className="card-title">How was your order? 💕</div><p className="small muted" style={{ margin: 0 }}>Your review helps other families find us. We show your first name, the date and your order ID.</p></div>
+      <div className="stars pick" role="radiogroup" aria-label="Rating">
+        {[1, 2, 3, 4, 5].map((n) => <button key={n} type="button" role="radio" aria-checked={rating === n} aria-label={`${n} star${n > 1 ? 's' : ''}`} className={n <= rating ? 'on' : 'off'} onClick={() => setRating(n)}>★</button>)}
+      </div>
+      <textarea className="input" rows={3} maxLength={600} value={body} onChange={(e) => setBody(e.target.value)} placeholder="What did you love? How was the taste, the look, the packing?" />
+      {err && <p className="err-text" style={{ margin: 0 }}>{err}</p>}
+      <button className="btn btn-primary" disabled={busy || body.trim().length < 3} onClick={send}>{busy ? 'Sending…' : 'Post my review'}</button>
+    </div>
+  )
+}
+
 export default function OrderView() {
   const { number } = useParams()
   const [sp] = useSearchParams()
@@ -267,6 +305,7 @@ export default function OrderView() {
             </dl>
             {o.quote_note && <div className="notice info small" style={{ marginTop: 10 }}>Note from the baker: {o.quote_note}</div>}
           </div>
+          <ReviewBox o={o} onDone={(r) => setO(r)} />
           <OrderDetails o={o} />
         </div>
         <aside className="stack summary">

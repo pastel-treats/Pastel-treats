@@ -24,7 +24,7 @@ export default function Checkout() {
   const [f, setF] = useState(() => ({
     fulfilment: 'pickup', date: null, slotId: null, slotLabel: null, alt_date: '', alt_slot_label: '',
     name: '', phone: '', sameWa: true, whatsapp: '', email: '', state: DEFAULT_STATE, city: '',
-    address: { line: '', area: '', city: 'Dindigul', pincode: '', landmark: '', instructions: '' },
+    address: { line: '', area: '', city: '', pincode: '', landmark: '', instructions: '' },
     occasion: '', occasion_date: '', occasion_person: '', remember_occasion: false, marketing_consent: false,
     notes: '', payment_method: 'upi', accepted_policies: false, request_out_of_zone: false,
     ...(loadDraft() || {}),
@@ -65,7 +65,7 @@ export default function Checkout() {
   const pinTyped = /^\d{6}$/.test(f.address.pincode.trim())
   const outOfZone = f.fulfilment === 'delivery' && pinTyped && !zone
   const isCustom = cart.some((l) => l.custom_request)
-  const cashAllowed = s.cash_for !== 'balance' && (f.fulfilment === 'pickup' ? s.cash_pickup : s.cash_delivery)
+  const cashAllowed = f.fulfilment !== 'courier' && s.cash_for !== 'balance' && (f.fulfilment === 'pickup' ? s.cash_pickup : s.cash_delivery)
   const cashBalanceOk = f.fulfilment === 'pickup' ? s.cash_pickup : s.cash_delivery
   const methods = [
     { id: 'upi', t: 'UPI / Google Pay', d: 'Scan the QR or tap to pay the advance' },
@@ -79,7 +79,7 @@ export default function Checkout() {
 
   function validate() {
     const e = {}
-    if (!f.date || !f.slotId) e.slot = 'Please choose a date and time slot'
+    if (!f.date || (!f.slotId && f.fulfilment !== 'courier')) e.slot = f.fulfilment === 'courier' ? 'Please choose a dispatch date' : 'Please choose a date and time slot'
     if (!f.name.trim()) e.name = 'Please enter your name'
     if (!validPhone(f.phone)) e.phone = 'Please enter a valid mobile number'
     if (!f.state || !f.city.trim()) e.city = 'Please choose where you are ordering from'
@@ -118,7 +118,7 @@ export default function Checkout() {
     const payload = {
       idempotency_key: idem.current,
       items: cart.map(({ key, ref_previews, ...rest }) => rest),
-      fulfilment: f.fulfilment, date: f.date, slot_id: f.slotId, alt_date: f.alt_date || null, alt_slot_label: f.alt_slot_label || null,
+      fulfilment: f.fulfilment, date: f.date, slot_id: f.fulfilment === 'courier' ? null : f.slotId, alt_date: f.alt_date || null, alt_slot_label: f.alt_slot_label || null,
       name: f.name.trim(), phone: f.phone, whatsapp: f.sameWa ? f.phone : f.whatsapp || f.phone, email: f.email.trim(), state: f.state, city: f.city.trim(),
       address: shipping ? f.address : null, request_out_of_zone: outOfZone && f.request_out_of_zone,
       occasion: f.occasion, occasion_date: f.occasion_date || null, occasion_person: f.occasion_person, remember_occasion: f.remember_occasion,
@@ -194,7 +194,7 @@ export default function Checkout() {
                 <div data-err="line"><Field label="House / flat, street" error={errors.line}><input className={'input' + (errors.line ? ' err' : '')} autoComplete="street-address" value={f.address.line} onChange={(e) => setAddr('line')(e.target.value)} /></Field></div>
                 <div className="grid-2">
                   <Field label="Area / locality"><input className="input" value={f.address.area} onChange={(e) => setAddr('area')(e.target.value)} /></Field>
-                  <Field label="City"><input className="input" autoComplete="address-level2" value={f.address.city} onChange={(e) => setAddr('city')(e.target.value)} /></Field>
+                  <Field label="City / town"><input className="input" autoComplete="address-level2" placeholder="Type your city / town" value={f.address.city} onChange={(e) => setAddr('city')(e.target.value)} /></Field>
                   <div data-err="pincode"><Field label="PIN code" error={errors.pincode}><input className={'input' + (errors.pincode ? ' err' : '')} inputMode="numeric" maxLength={6} autoComplete="postal-code" value={f.address.pincode} onChange={(e) => setAddr('pincode')(e.target.value.replace(/\D/g, ''))} /></Field></div>
                   <Field label="Landmark"><input className="input" value={f.address.landmark} onChange={(e) => setAddr('landmark')(e.target.value)} /></Field>
                 </div>
@@ -211,9 +211,9 @@ export default function Checkout() {
 
           {/* 2. when */}
           <section className="card" data-err="slot">
-            <div className="card-title">2 · Choose date & time</div>
-            <Calendar productIds={productIds} mode={f.fulfilment} date={f.date} slotId={f.slotId} tz={tz}
-              onChange={({ date, slotId, slotLabel }) => setF((x) => ({ ...x, date, slotId, slotLabel }))} />
+            <div className="card-title">{f.fulfilment === 'courier' ? '2 · Choose dispatch date' : '2 · Choose date & time'}</div>
+            <Calendar productIds={productIds} mode={f.fulfilment} date={f.date} slotId={f.slotId} tz={tz} dateOnly={f.fulfilment === 'courier'}
+              onChange={({ date, slotId, slotLabel }) => setF((x) => ({ ...x, date, slotId, slotLabel: x.fulfilment === 'courier' && date ? 'Courier dispatch' : slotLabel }))} />
             {errors.slot && <p className="err-text">{errors.slot}</p>}
             <details style={{ marginTop: 14 }}>
               <summary className="small" style={{ cursor: 'pointer', color: 'var(--forest)' }}>Add an alternative date/time (optional)</summary>
@@ -242,7 +242,7 @@ export default function Checkout() {
           <section className="card">
             <div className="row between"><div className="card-title">3 · Your details</div></div>
             <div className="grid-2">
-              <div data-err="name"><Field label="Full name" error={errors.name}><input className={'input' + (errors.name ? ' err' : '')} autoComplete="name" value={f.name} onChange={(e) => set('name')(e.target.value)} /></Field></div>
+              <div data-err="name"><Field label="Full name" error={errors.name}><input className={'input' + (errors.name ? ' err' : '')} autoComplete="name" autoCapitalize="characters" style={{ textTransform: 'uppercase' }} value={f.name} onChange={(e) => set('name')(e.target.value.toUpperCase())} /></Field></div>
               <div data-err="phone"><Field label="Mobile number" error={errors.phone}><PhoneInput invalid={!!errors.phone} value={f.phone} onChange={set('phone')} /></Field></div>
             </div>
             <div data-err="city" style={{ marginTop: 12 }}>

@@ -17,8 +17,8 @@ for (const c of SEED_CATEGORIES)
   sql += `insert into public.categories(slug, name, description, sort) values (${q(c.slug)}, ${q(c.name)}, ${q(c.description)}, ${c.sort}) on conflict (slug) do nothing;\n`
 sql += '\n'
 SEED_PRODUCTS.forEach((p, i) => {
-  sql += `insert into public.products(category_id, name, description, images, base_price, unit_label, weights, flavours, fillings, frostings, designs, egg_options, allergens, dietary, occasions, lead_time_hours, is_featured, allow_message, sort, min_qty, pricing_mode, courier_ok)
-select id, ${q(p.name)}, ${q(p.description)}, ${arr(p.images)}, ${p.base_price}, ${q(p.unit || 'cake')}, ${j(p.weights)}, ${j(p.flavours)}, ${j(p.fillings)}, ${j(p.frostings)}, ${j(p.designs)}, ${j(p.egg_options)}, ${q(p.allergens)}, ${q(p.dietary)}, ${arr(p.occasions)}, ${p.lead_time_hours ?? 'null'}, ${!!p.featured}, ${p.allow_message !== false}, ${i + 1}, ${p.min_qty || 1}, ${q(p.pricing_mode || 'fixed')}, ${!!p.courier_ok}
+  sql += `insert into public.products(category_id, name, description, images, base_price, unit_label, weights, flavours, fillings, frostings, designs, egg_options, allergens, dietary, occasions, lead_time_hours, is_featured, allow_message, sort, min_qty, pricing_mode, courier_ok, enquiry_only, seasonal_note)
+select id, ${q(p.name)}, ${q(p.description)}, ${arr(p.images)}, ${p.base_price}, ${q(p.unit || 'cake')}, ${j(p.weights)}, ${j(p.flavours)}, ${j(p.fillings)}, ${j(p.frostings)}, ${j(p.designs)}, ${j(p.egg_options)}, ${q(p.allergens)}, ${q(p.dietary)}, ${arr(p.occasions)}, ${p.lead_time_hours ?? 'null'}, ${!!p.featured}, ${p.allow_message !== false}, ${i + 1}, ${p.min_qty || 1}, ${q(p.pricing_mode || 'fixed')}, ${!!p.courier_ok}, ${!!p.enquiry_only}, ${q(p.seasonal_note)}
 from public.categories where slug = ${q(p.cat)} and not exists (select 1 from public.products where name = ${q(p.name)});\n`
 })
 sql += '\n'

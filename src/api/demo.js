@@ -7,7 +7,7 @@ import { availability as availCalc, ACTIVE } from '../lib/schedule.js'
 import { normalizePhone } from '../lib/contact.js'
 import { todayISO, addDaysISO } from '../lib/dates.js'
 
-const KEY = 'pt-demo-db-v10'
+const KEY = 'pt-demo-db-v11'
 const SESSION = 'pt-demo-session'
 export const DEMO_ADMIN_PASSWORD = 'pastel123'
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now())
@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 function freshDb() {
   const db = { settings: clone(SEED_SETTINGS), categories: [], products: [], addons: [], time_slots: [], delivery_zones: [], blackout_dates: [],
-    customers: [], customer_addresses: [], occasions: [], orders: [], order_status_history: [], payments: [], notification_log: [], audit_logs: [], admins: [] }
+    customers: [], customer_addresses: [], occasions: [], orders: [], order_status_history: [], payments: [], notification_log: [], audit_logs: [], admins: [], reviews: [] }
   db.settings.upi_id = 'pasteltreats@okaxis'
   SEED_CATEGORIES.forEach((c) => db.categories.push({ id: uid(), visible: true, image_url: null, ...c }))
   SEED_PRODUCTS.forEach((p, i) => {
@@ -91,6 +91,18 @@ function seedDemoOrders(db) {
   const pending = db.orders.at(-1)
   db.payments.push({ id: uid(), order_id: pending.id, kind: 'advance', method: 'upi', amount: pending.advance_due, reference: 'DEMO-UTR-4471', status: 'pending', note: 'Reported by customer', created_at: nowISO() })
   recalc(db, pending.id)
+  const done = db.orders.filter((o) => o.status === 'completed')
+  const words = [
+    [5, 'The red velvet cake was so soft and the buttercream not too sweet. Everyone at the party asked where we ordered from!', true],
+    [5, 'Coffee hazelnut entremets looked like they came from a five-star patisserie. Beautifully packed too.', true],
+    [5, 'Brownies reached Chennai by courier perfectly fudgy. Ordering again for Diwali.', true],
+    [4, 'Lovely pistachio cake, delivered right on time.', false],
+  ]
+  words.forEach(([rating, body, approved], i) => {
+    const o = done[i]; if (!o) return
+    const at = new Date(new Date(o.requested_date).getTime() + 864e5).toISOString()
+    db.reviews.push({ id: uid(), order_id: o.id, rating, body, display_name: o.customer_name.replace(/^Demo · /, '').split(' ')[0], approved, approved_at: approved ? at : null, created_at: at })
+  })
 }
 
 function recalc(db, orderId) {
@@ -140,6 +152,7 @@ const err = (m) => { throw new Error(m) }
 const newToken = () => Array.from({ length: 14 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('')
 const view = (db, o) => ({
   ...o, balance: o.total - o.amount_paid, link_token: o.access_token || (o.access_token = newToken()),
+  review: (() => { const r = (db.reviews || []).find((x) => x.order_id === o.id); return r ? { rating: r.rating, body: r.body, approved: r.approved, at: r.created_at } : null })(),
   history: db.order_status_history.filter((h) => h.order_id === o.id).map((h) => ({ to: h.to_status, at: h.created_at })),
   payments: db.payments.filter((p) => p.order_id === o.id).map((p) => ({ kind: p.kind, method: p.method, amount: p.amount, status: p.status, at: p.created_at })),
 })
@@ -207,6 +220,7 @@ export function createDemoApi() {
       if (p.fulfilment === 'delivery' && !s.home_delivery_enabled) err('INVALID: home delivery is not available — please choose self pickup')
       const method = p.payment_method || 'upi'
       if (method === 'cash' && (s.cash_for || 'both') === 'balance') err('INVALID: the advance must be paid online/UPI; cash is accepted for the balance only')
+      if (method === 'cash' && p.fulfilment === 'courier') err('INVALID: courier orders are paid by UPI')
       if (method === 'cash' && p.fulfilment === 'pickup' && !s.cash_pickup) err('INVALID: cash is not available for pickup orders')
       if (method === 'cash' && p.fulfilment === 'delivery' && !s.cash_delivery) err('INVALID: cash is not available for delivery orders')
       if (method === 'gateway' && !s.gateway_enabled) err('INVALID: online payment is not enabled')
@@ -222,15 +236,16 @@ export function createDemoApi() {
         if (!String(p.address?.line || '').trim() || !String(p.address?.pincode || '').trim()) err('INVALID: please enter the full delivery address and PIN code')
         if (!q.zone_found) { if (p.request_out_of_zone) needsZone = true; else err('OUT_OF_ZONE: sorry, we do not deliver to this PIN code yet') }
       }
-      const slot = db.time_slots.find((x) => x.id === p.slot_id && x.active !== false)
+      const courierNoSlot = p.fulfilment === 'courier' && !p.slot_id
+      const slot = courierNoSlot ? { id: null, label: 'Courier dispatch' } : db.time_slots.find((x) => x.id === p.slot_id && x.active !== false)
       if (!slot) err('SLOT_UNAVAILABLE: please choose a time slot')
       const av = availCalc({ settings: s, slots: db.time_slots, blackouts: db.blackout_dates, orders: db.orders, products: db.products, from: p.date, to: p.date,
         productIds: q.items.map((i) => i.product_id), mode: p.fulfilment })
-      if (!av.days[0]?.slots.find((x) => x.id === slot.id)?.eligible) err(`SLOT_UNAVAILABLE: that date/time is no longer available (please order ${av.lead_hours} hrs prior). Please pick another slot.`)
+      if (courierNoSlot ? !av.days[0]?.available : !av.days[0]?.slots.find((x) => x.id === slot.id)?.eligible) err(`SLOT_UNAVAILABLE: that date/time is no longer available (please order ${av.lead_hours} hrs prior). Please pick another slot.`)
 
       let c = db.customers.find((x) => x.phone === phone)
       if (!c) {
-        c = { id: uid(), name: p.name.trim(), phone, phone_verified: false, whatsapp: wa, email: p.email || null, marketing_consent: !!p.marketing_consent,
+        c = { id: uid(), name: p.name.trim().toUpperCase(), phone, phone_verified: false, whatsapp: wa, email: p.email || null, marketing_consent: !!p.marketing_consent,
           consent_at: p.marketing_consent ? nowISO() : null, preferred_reminder: 'whatsapp', notes: null, created_at: nowISO(), state: p.state || null, city: p.city || null }
         db.customers.push(c)
       } else {
@@ -250,7 +265,7 @@ export function createDemoApi() {
       let num
       do { db.counters[yy] = (db.counters[yy] || 0) + 1; num = `PT-${db.counters[yy]}-${yy}` } while (db.orders.some((x) => x.order_number === num))
       const zone = db.delivery_zones.find((z) => z.name === q.zone)
-      const o = { id: uid(), order_number: num, idempotency_key: p.idempotency_key || null, customer_id: c.id, customer_name: p.name.trim(), phone, whatsapp: wa, email: p.email || null,
+      const o = { id: uid(), order_number: num, idempotency_key: p.idempotency_key || null, customer_id: c.id, customer_name: p.name.trim().toUpperCase(), phone, whatsapp: wa, email: p.email || null,
         customer_state: c.state || null, customer_city: c.city || null, access_token: newToken(),
         status, payment_status: 'not_paid', payment_method: method, items: q.items, subtotal: q.subtotal, delivery_charge: q.delivery_charge, discount: 0, total: q.total,
         advance_due: q.advance_due, amount_paid: 0, is_custom: isCustom, quote_status: isCustom ? 'pending' : 'n/a', quote_note: null, fulfilment: p.fulfilment,
@@ -284,6 +299,28 @@ export function createDemoApi() {
       const o = db.orders.find((x) => x.access_token && x.access_token === String(token || '').trim())
       if (!o) err('NOT_FOUND: this order link is not valid')
       return clone({ ...view(db, o), phone: o.phone })
+    },
+    async submitReview(token, rating, body) {
+      await sleep(200)
+      const db = load()
+      rateLimit('review:' + token, 5, 6e5)
+      const o = db.orders.find((x) => x.access_token && x.access_token === String(token || '').trim())
+      if (!o) err('NOT_FOUND: this order link is not valid')
+      const d = o.confirmed_date || o.requested_date
+      if (!['advance_received', 'confirmed', 'in_preparation', 'ready', 'out_for_delivery', 'completed'].includes(o.status) || (o.status !== 'completed' && d > todayISO()))
+        err('INVALID: you can review once your order has been handed over')
+      if (!(rating >= 1 && rating <= 5)) err('INVALID: please choose 1 to 5 stars')
+      if (String(body || '').trim().length < 3) err('INVALID: please write a few words')
+      if (db.reviews.some((r) => r.order_id === o.id)) err('INVALID: you have already reviewed this order — thank you!')
+      const first = o.customer_name.replace(/^Demo · /, '').trim().split(/\s+/)[0]
+      db.reviews.push({ id: uid(), order_id: o.id, rating, body: String(body).trim().slice(0, 600), display_name: first.charAt(0) + first.slice(1).toLowerCase(), approved: false, approved_at: null, created_at: nowISO() })
+      save()
+      return clone({ ...view(db, o), phone: o.phone })
+    },
+    async publicReviews() {
+      const db = load()
+      return clone((db.reviews || []).filter((r) => r.approved).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 30)
+        .map((r) => ({ name: r.display_name, rating: r.rating, body: r.body, at: r.created_at, order_number: db.orders.find((o) => o.id === r.order_id)?.order_number })))
     },
     async getOrdersByPhone(phone) {
       await sleep(200)
@@ -406,7 +443,7 @@ export function createDemoApi() {
       db[table] = db[table].filter((x) => x[key] !== id)
       if (table === 'payments' && r) recalc(db, r.order_id)
       if (table === 'customers') { db.occasions = db.occasions.filter((o) => o.customer_id !== id); db.customer_addresses = db.customer_addresses.filter((o) => o.customer_id !== id) }
-      if (table === 'orders') { db.payments = db.payments.filter((p) => p.order_id !== id); db.order_status_history = db.order_status_history.filter((p) => p.order_id !== id) }
+      if (table === 'orders') { db.reviews = (db.reviews || []).filter((p) => p.order_id !== id); db.payments = db.payments.filter((p) => p.order_id !== id); db.order_status_history = db.order_status_history.filter((p) => p.order_id !== id) }
       audit(db, 'delete', table, id, r)
       save()
     },
