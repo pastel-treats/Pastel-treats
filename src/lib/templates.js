@@ -5,20 +5,20 @@ import { fmtDate } from './dates.js'
 
 const link = (o) => (o.access_token ? `${location.origin}${location.pathname}#/o/${o.access_token}` : `${location.origin}${location.pathname}#/order/${o.order_number}`)
 const when = (o) => `${fmtDate(o.confirmed_date || o.requested_date, { weekday: true })}, ${o.confirmed_slot_label || o.slot_label}`
-const first = (n) => (n || '').replace(/^Demo · /, '').split(' ')[0]
+const first = (n) => { const w = (n || '').replace(/^Demo · /, '').trim().split(/\s+/)[0] || ''; return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() }
 
 export const ORDER_TEMPLATES = {
-  received: { label: 'Order received', text: (o, s) => `Hi ${first(o.customer_name)}! 🎂 Thank you for your order ${o.order_number} with ${s.business_name}. We're reviewing it and will confirm shortly.\nTrack it here: ${link(o)}` },
+  received: { label: 'Order received', text: (o, s) => `Hi ${first(o.customer_name)}! 🎂 Thank you for ordering with ${s.business_name}.\nOrder ID: ${o.order_number}\nStatus: Order placed — awaiting confirmation ⏳\nWe'll confirm it shortly. Track it here: ${link(o)}` },
   pay_advance: { label: 'Request advance', text: (o, s) => `Hi ${first(o.customer_name)}! To lock in your slot (${when(o)}), please pay the advance of ${inr(o.advance_due - o.amount_paid)} for order ${o.order_number}.\nUPI: ${s.upi_id || '(UPI ID)'}\nPay & track here: ${link(o)}` },
   quote: { label: 'Send custom quote', text: (o, s) => `Hi ${first(o.customer_name)}! We loved your custom cake idea 💐 The final price for order ${o.order_number} is ${inr(o.total)} (advance ${inr(o.advance_due)}).${o.quote_note ? '\nNote: ' + o.quote_note : ''}\nIf you're happy, please pay the advance here: ${link(o)}` },
   payment_received: { label: 'Payment received', text: (o) => `Hi ${first(o.customer_name)}! We've received ${inr(o.amount_paid)} for order ${o.order_number}. Thank you! Balance due: ${inr(o.total - o.amount_paid)}.\nYour order: ${link(o)}` },
-  confirmed: { label: 'Order confirmed', text: (o, s) => `Hi ${first(o.customer_name)}! ✅ Your order ${o.order_number} is confirmed for ${when(o)} (${o.fulfilment === 'pickup' ? 'pickup at ' + s.pickup_address : 'home delivery'}). See you soon!\nYour order: ${link(o)}` },
+  confirmed: { label: 'Order confirmed', text: (o, s) => `Hi ${first(o.customer_name)}!\nOrder ID: ${o.order_number}\nStatus: Order confirmed ✅\n${o.fulfilment === 'pickup' ? `Pickup: ${when(o)} at ${s.pickup_address}` : o.fulfilment === 'courier' ? `Courier dispatch: ${fmtDate(o.confirmed_date || o.requested_date, { weekday: true })}` : `Delivery: ${when(o)}`}\nYour order: ${link(o)}` },
   rescheduled: { label: 'Schedule changed', text: (o) => `Hi ${first(o.customer_name)}, a quick update on order ${o.order_number}: your new ${o.fulfilment} time is ${when(o)}. Please let us know if that doesn't work. Details: ${link(o)}` },
   price_changed: { label: 'Price changed', text: (o) => `Hi ${first(o.customer_name)}, the total for order ${o.order_number} has been updated to ${inr(o.total)} (advance ${inr(o.advance_due)}, paid ${inr(o.amount_paid)}). Details: ${link(o)}` },
   preparing: { label: 'Preparation started', text: (o) => `Hi ${first(o.customer_name)}! Your cake for order ${o.order_number} is being baked right now 👩‍🍳` },
   ready: { label: 'Ready for pickup', text: (o, s) => `Hi ${first(o.customer_name)}! 🎉 Order ${o.order_number} is ready for pickup at ${s.pickup_address}. Balance due: ${inr(o.total - o.amount_paid)}. ${s.pickup_instructions || ''}\nYour order: ${link(o)}` },
-  out_for_delivery: { label: 'Out for delivery', text: (o) => `Hi ${first(o.customer_name)}! 🚗 Order ${o.order_number} is on its way. Balance due on delivery: ${inr(o.total - o.amount_paid)}.` },
-  completed: { label: 'Thank you + feedback', text: (o, s) => `Hi ${first(o.customer_name)}! Thank you for choosing ${s.business_name} 💚 We hope everyone loved it. We'd be grateful for a quick review or a tag on Instagram ${s.instagram || ''}` },
+  out_for_delivery: { label: 'Out for delivery', text: (o) => `Hi ${first(o.customer_name)}!\nOrder ID: ${o.order_number}\nStatus: ${o.fulfilment === 'courier' ? 'Dispatched by courier 📦' : 'Out for delivery 🚗'}${o.total - o.amount_paid > 0 ? `\nBalance due: ${inr(o.total - o.amount_paid)}` : ''}\nTrack it here: ${link(o)}` },
+  completed: { label: 'Thank you + feedback', text: (o, s) => `Hi ${first(o.customer_name)}! Thank you for choosing ${s.business_name} 💚 We hope everyone loved it. We'd love a quick review — tap your order link and leave a few words: ${link(o)}\nOr tag us on Instagram ${s.instagram || ''}` },
   cancelled: { label: 'Cancelled', text: (o) => `Hi ${first(o.customer_name)}, order ${o.order_number} has been cancelled. ${o.amount_paid > 0 ? 'Your refund will be processed as per our policy.' : ''}` },
   refunded: { label: 'Refund processed', text: (o) => `Hi ${first(o.customer_name)}, the refund for order ${o.order_number} has been processed. It should reach your account in a few days.` },
 }

@@ -271,11 +271,131 @@ def granola():
     return frame(b, '#fff3c9', '#eafeb4')
 
 
+# ---------- seasonal ----------
+def ice_cream():
+    b = '<ellipse cx="400" cy="660" rx="170" ry="26" fill="#20543f" opacity=".12" filter="url(#soft)"/>'
+    b += '<path d="M290 430 L400 680 L510 430 Z" fill="#e3b77e"/>'
+    for i in range(6):
+        b += f'<path d="M{300+i*36} 430 L{400+(i-2.5)*8:.0f} 660" stroke="#c9965a" stroke-width="5"/>'
+    b += '<path d="M300 440 L500 440" stroke="#c9965a" stroke-width="5"/>'
+    for (x, y, r, c) in [(400, 330, 115, '#ffebf4'), (330, 400, 95, '#ffdac1'), (470, 400, 95, '#bfebef')]:
+        b += f'<circle cx="{x}" cy="{y}" r="{r}" fill="{c}"/>'
+        b += f'<circle cx="{x-r*0.35:.0f}" cy="{y-r*0.35:.0f}" r="{r*0.3:.0f}" fill="#fff" opacity=".5"/>'
+    b += ''.join(f'<rect x="{340+(i*53)%140}" y="{250+(i*37)%160}" width="16" height="6" rx="3" fill="{["#d9435e","#ffec9d","#a1d7c2","#6aa6d9"][i%4]}" transform="rotate({i*40} {348+(i*53)%140} {253+(i*37)%160})"/>' for i in range(14))
+    b += '<circle cx="400" cy="205" r="26" fill="#d9435e"/><path d="M400 180 q10 -30 34 -36" stroke="#20543f" stroke-width="5" fill="none"/>'
+    return frame(b, '#eef8f3', '#ffebf4')
+
+
+def mango_sticky_rice():
+    b = plate(600)
+    b += '<ellipse cx="330" cy="520" rx="140" ry="70" fill="#fffaf2"/>'
+    for i in range(60):
+        x = 210 + (i * 37) % 240
+        y = 480 + (i * 23) % 80
+        b += f'<ellipse cx="{x}" cy="{y}" rx="9" ry="5" fill="#f3ead8" transform="rotate({i*29} {x} {y})"/>'
+    b += '<path d="M220 500 q110 -40 220 0" stroke="#fff" stroke-width="16" fill="none" opacity=".9"/>'
+    for k in range(5):
+        x = 470 + k * 26
+        b += f'<path d="M{x} 560 q-40 -150 40 -190 q50 30 10 190 Z" fill="#ffb400" transform="rotate({-20+k*8} {x} 560)"/>'
+        b += f'<path d="M{x+8} 540 q-20 -110 26 -150" stroke="#ffd166" stroke-width="5" fill="none" transform="rotate({-20+k*8} {x} 560)"/>'
+    b += '<circle cx="300" cy="455" r="8" fill="#f3ead8"/><circle cx="330" cy="448" r="6" fill="#3a3a3a"/><circle cx="350" cy="460" r="6" fill="#3a3a3a"/>'
+    b += '<path d="M560 330 q30 -40 70 -30 q-20 40 -70 30 Z" fill="#7cc4a0"/>'
+    return frame(b, '#fff3c9', '#ffdac1')
+
+
+# ---------- hampers ----------
+def _box(x, y, w, h, c1, c2, ribbon='#d9435e'):
+    s = f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="14" fill="{c1}"/>'
+    s += f'<rect x="{x-14}" y="{y-40}" width="{w+28}" height="56" rx="12" fill="{c2}"/>'
+    s += f'<rect x="{x+w/2-18}" y="{y-40}" width="36" height="{h+40}" fill="{ribbon}"/>'
+    s += f'<path d="M{x+w/2} {y-40} q-70 -80 -100 -20 q30 30 100 20 Z" fill="{ribbon}"/><path d="M{x+w/2} {y-40} q70 -80 100 -20 q-30 30 -100 20 Z" fill="{ribbon}"/>'
+    s += f'<circle cx="{x+w/2}" cy="{y-42}" r="16" fill="{ribbon}"/>'
+    return s
+
+
+def hamper_festival():
+    b = '<ellipse cx="400" cy="660" rx="260" ry="30" fill="#20543f" opacity=".12" filter="url(#soft)"/>'
+    b += _box(230, 400, 340, 250, '#ffdac1', '#ffc7a8', '#d9435e')
+    for i, x in enumerate([170, 630]):
+        b += f'<path d="M{x-40} 660 q40 -40 80 0 Z" fill="#c9783a"/><path d="M{x} 615 q-14 -30 0 -60 q14 30 0 60 Z" fill="#ffb400"/><path d="M{x} 600 q-6 -16 0 -32 q6 16 0 32 Z" fill="#fff3c9"/>'
+    b += ''.join(f'<circle cx="{120+i*60}" cy="{120+(i%3)*40}" r="6" fill="{["#ffb400","#d9435e","#a1d7c2"][i%3]}"/>' for i in range(10))
+    b += '<text x="400" y="560" text-anchor="middle" font-family="Georgia,serif" font-size="44" fill="#20543f">Festive</text>'
+    return frame(b, '#fff3c9', '#ffebf4')
+
+
+def hamper_corporate():
+    b = '<ellipse cx="400" cy="660" rx="260" ry="30" fill="#20543f" opacity=".12" filter="url(#soft)"/>'
+    b += _box(170, 430, 220, 220, '#20543f', '#2e6b52', '#e3c27a')
+    b += _box(420, 470, 210, 180, '#fffaf2', '#f1e6d4', '#20543f')
+    b += '<rect x="440" y="520" width="170" height="56" rx="10" fill="#fff"/><text x="525" y="556" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="22" fill="#20543f">YOUR LOGO</text>'
+    return frame(b, '#eef8f3', '#d9efe6')
+
+
+def hamper_store_opening():
+    b = '<ellipse cx="400" cy="660" rx="260" ry="30" fill="#20543f" opacity=".12" filter="url(#soft)"/>'
+    b += '<rect x="170" y="260" width="460" height="300" rx="20" fill="#fffaf2"/><rect x="170" y="230" width="460" height="60" rx="16" fill="#a1d7c2"/>'
+    b += ''.join(f'<path d="M{170+i*92} 290 q46 50 92 0 Z" fill="{["#ffdac1","#ffebf4"][i%2]}"/>' for i in range(5))
+    b += '<text x="400" y="272" text-anchor="middle" font-family="Georgia,serif" font-size="34" fill="#20543f">GRAND OPENING</text>'
+    b += '<path d="M120 420 C300 380 500 460 680 420" stroke="#d9435e" stroke-width="22" fill="none"/>'
+    b += '<path d="M400 420 q-60 -60 -90 0 q30 30 90 0 Z" fill="#d9435e"/><path d="M400 420 q60 -60 90 0 q-30 30 -90 0 Z" fill="#d9435e"/><circle cx="400" cy="420" r="18" fill="#b8324b"/>'
+    b += '<path d="M470 520 l70 -70 l20 20 l-70 70 Z" fill="#c0c7c4"/><circle cx="460" cy="540" r="22" fill="none" stroke="#20543f" stroke-width="8"/><circle cx="500" cy="580" r="22" fill="none" stroke="#20543f" stroke-width="8"/>'
+    return frame(b, '#ffebf4', '#fff3c9')
+
+
+def hamper_brand_launch():
+    b = '<ellipse cx="400" cy="660" rx="240" ry="30" fill="#20543f" opacity=".12" filter="url(#soft)"/>'
+    b += '<rect x="230" y="380" width="340" height="270" rx="18" fill="#bfebef"/><path d="M230 380 L400 300 L570 380 Z" fill="#9fd9df"/>'
+    b += '<rect x="290" y="470" width="220" height="80" rx="12" fill="#fff"/><text x="400" y="520" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="26" fill="#20543f">LAUNCH KIT</text>'
+    b += ''.join(f'<rect x="{200+(i*71)%420}" y="{120+(i*43)%180}" width="14" height="24" rx="3" fill="{["#ffb400","#d9435e","#a1d7c2","#6228d7","#ffdac1"][i%5]}" transform="rotate({i*33} {207+(i*71)%420} {132+(i*43)%180})"/>' for i in range(22))
+    b += '<path d="M400 300 l-16 -60 l16 -20 l16 20 Z" fill="#ffec9d"/>'
+    return frame(b, '#eef8f3', '#ffebf4')
+
+
+# ---------- our kitchen (generic equipment, no brand logos) ----------
+def combi_oven():
+    b = '<ellipse cx="400" cy="660" rx="260" ry="30" fill="#20543f" opacity=".14" filter="url(#soft)"/>'
+    b += '<rect x="170" y="200" width="460" height="440" rx="26" fill="#d9dee0"/><rect x="170" y="200" width="460" height="440" rx="26" fill="url(#shine)"/>'
+    b += '<rect x="200" y="240" width="300" height="360" rx="18" fill="#3a3f42"/><rect x="220" y="260" width="260" height="320" rx="12" fill="#5b6266"/>'
+    for y in [330, 420, 510]:
+        b += f'<rect x="232" y="{y}" width="236" height="10" rx="5" fill="#8b9397"/>'
+    b += '<path d="M250 300 L330 300" stroke="#fff" stroke-width="6" opacity=".35" stroke-linecap="round"/>'
+    b += '<rect x="520" y="240" width="90" height="360" rx="14" fill="#c4cacd"/>'
+    b += '<rect x="535" y="260" width="60" height="44" rx="6" fill="#1f2a2e"/><text x="565" y="290" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" fill="#7cf1c4">180°</text>'
+    b += ''.join(f'<circle cx="565" cy="{350+i*60}" r="{20 if i==0 else 12}" fill="#9aa3a7"/>' for i in range(4))
+    b += '<rect x="200" y="410" width="12" height="80" rx="6" fill="#c4cacd"/>'
+    b += '<rect x="200" y="640" width="30" height="20" rx="6" fill="#9aa3a7"/><rect x="570" y="640" width="30" height="20" rx="6" fill="#9aa3a7"/>'
+    return frame(b, '#eef8f3', '#d9efe6')
+
+
+def stand_mixer(body='#a8d5ba', shade='#8cc1a3', bg1='#eef8f3', bg2='#d9efe6'):
+    b = '<ellipse cx="400" cy="660" rx="240" ry="30" fill="#20543f" opacity=".14" filter="url(#soft)"/>'
+    b += f'<rect x="200" y="600" width="360" height="56" rx="22" fill="{body}"/>'
+    b += f'<path d="M230 610 L230 330 Q230 230 330 230 L520 230 Q600 230 600 300 L600 360 Q600 400 560 400 L330 400 L330 610 Z" fill="{body}"/>'
+    b += f'<path d="M250 600 L250 340 Q250 260 330 252" stroke="{shade}" stroke-width="18" fill="none" stroke-linecap="round"/>'
+    b += '<path d="M240 260 Q330 220 520 236" stroke="#fff" stroke-width="10" opacity=".35" fill="none" stroke-linecap="round"/>'
+    b += '<path d="M360 470 L560 470 L540 600 L380 600 Z" fill="#e6eaec"/><path d="M360 470 L560 470" stroke="#c4cacd" stroke-width="10" stroke-linecap="round"/>'
+    b += '<path d="M380 485 Q395 590 470 595" stroke="#fff" stroke-width="8" opacity=".6" fill="none"/>'
+    b += '<path d="M460 400 L460 470" stroke="#9aa3a7" stroke-width="10"/><path d="M440 470 q20 60 40 0" stroke="#9aa3a7" stroke-width="8" fill="none"/>'
+    b += f'<circle cx="290" cy="330" r="14" fill="{shade}"/><rect x="560" y="290" width="40" height="16" rx="8" fill="#e6eaec"/>'
+    return frame(b, bg1, bg2)
+
+
+def mixer_green():
+    return stand_mixer('#a8d5ba', '#8cc1a3', '#eef8f3', '#d9efe6')
+
+
+def mixer_red():
+    return stand_mixer('#d93b48', '#b72f3b', '#ffebf4', '#ffdac1')
+
+
 ITEMS = {
     'ai-custom-cake': custom_cake, 'ai-blondies': blondie, 'ai-cookie-box': cookie_box, 'ai-ragi-puff': ragi_puff,
     'ai-sweet-tart': sweet_tart, 'ai-savoury-tart': savoury_tart, 'ai-rocher-bomb': rocher_bomb, 'ai-shortbread': shortbread,
     'ai-tiramisu': tiramisu, 'ai-mud-pie': mud_pie, 'ai-pudding-bowl': pudding_bowl, 'ai-mochi': mochi,
     'ai-korean-bun': korean_bun, 'ai-bundt': bundt, 'ai-cinnamon-rolls': cinnamon_rolls, 'ai-protein': protein, 'ai-granola': granola,
+    'ai-ice-cream': ice_cream, 'ai-mango-sticky-rice': mango_sticky_rice, 'ai-hamper-festival': hamper_festival,
+    'ai-hamper-corporate': hamper_corporate, 'ai-hamper-store-opening': hamper_store_opening, 'ai-hamper-brand-launch': hamper_brand_launch,
+    'ai-kitchen-combi-oven': combi_oven, 'ai-kitchen-mixer-green': mixer_green, 'ai-kitchen-mixer-red': mixer_red,
 }
 
 if __name__ == '__main__':

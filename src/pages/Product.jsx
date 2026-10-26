@@ -76,7 +76,6 @@ export default function Product() {
   }, [p, sel, data.addons])
 
   if (!p || !p.is_active) return <Empty title="This treat isn’t on the menu right now"><Link to="/menu" className="btn btn-soft">Back to menu</Link></Empty>
-  const isCakeLike = p.allow_message !== false
   const addons = data.addons.filter((a) => a.active !== false)
   const toggleAddon = (a) => setSel((s) => {
     const has = s.addons.find((x) => x.id === a.id)
@@ -112,6 +111,13 @@ export default function Product() {
   const N = () => ++step
   const cat = data.categories.find((c) => c.id === p.category_id)
   const lead = Math.max(settings.lead_time_hours || 48, p.lead_time_hours || 0)
+  // "Message on the cake", reference pictures etc. only make sense for cakes
+  const isCakeLike = p.allow_message !== false && (p.pricing_mode === 'per_kg' || cat?.slug === 'cakes')
+  // brownies, blondies, cookies and tarts can be ordered as a mixed box by messaging the baker
+  const canAssort = !p.enquiry_only && /brownie|blondie|cookie|tart/i.test(p.name) && !/protein/i.test(p.name)
+  const optText = [sel.weight, sel.flavour].filter(Boolean).join(', ')
+  const enquiryMsg = `Hi Pastel Treats! I'd like to order: ${p.name}${optText ? ` (${optText})` : ''}${sel.qty > 1 ? ` × ${sel.qty}` : ''}.\nPlease share the price and details.`
+  const assortMsg = `Hi Pastel Treats! I'd like an ASSORTED ${p.name.replace(/\s+$/, '')}${sel.weight ? ` (${sel.weight})` : ''}${sel.qty > 1 ? `, quantity ${sel.qty}` : ''} — a mix of flavours.\nFlavours I'd love: `
 
   return (
     <div className="wrap" style={{ paddingBottom: 24 }}>
@@ -150,6 +156,13 @@ export default function Product() {
               <Options n={(p.weights?.length && N()) || 0} title="Choose size" list={p.weights} value={sel.weight} onChange={set('weight')} priceMode="full" />
               <Options n={(p.flavours?.length && N()) || 0} title="Choose flavour" list={p.flavours} value={sel.flavour} onChange={set('flavour')} />
             </>
+          )}
+          {canAssort && settings.whatsapp && (
+            <a className="assort-card" href={waLink(settings.whatsapp, assortMsg)} target="_blank" rel="noreferrer">
+              <span className="ic">🎁</span>
+              <span className="grow"><b>Want an assorted box?</b><span className="tiny">Mix your favourite flavours — message the baker and she’ll put it together for you.</span></span>
+              <WaIcon size={22} />
+            </a>
           )}
           <Options n={(p.fillings?.length && N()) || 0} title="Choose filling" list={p.fillings} value={sel.filling} onChange={set('filling')} />
           <Options n={(p.frostings?.length && N()) || 0} title="Choose frosting" list={p.frostings} value={sel.frosting} onChange={set('frosting')} />
@@ -252,11 +265,15 @@ export default function Product() {
           <div className="price-bar">
             <button className="grow" style={{ background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', padding: 0 }} onClick={() => setShowBreak((v) => !v)}>
               <div className="tiny muted">{sel.custom_request ? 'Estimated total' : 'Total'} · <u>{showBreak ? 'hide' : 'see'} breakdown</u></div>
-              <div className="total">{priced.line ? inr(priced.line.line_total) : '—'}</div>
+              <div className="total">{p.enquiry_only ? (p.base_price ? `from ${inr(p.base_price)}` : 'Price on request') : priced.line ? inr(priced.line.line_total) : '—'}</div>
             </button>
-            <button className="btn btn-primary" disabled={!p.is_available || !!priced.err || uploading} onClick={() => add(false)}>
-              {editing ? 'Update cart' : 'Add to cart'}
-            </button>
+            {p.enquiry_only ? (
+              <a className="btn btn-wa" href={settings.whatsapp ? waLink(settings.whatsapp, enquiryMsg) : '#/contact'} target="_blank" rel="noreferrer"><WaIcon size={18} /> Message to order</a>
+            ) : (
+              <button className="btn btn-primary" disabled={!p.is_available || !!priced.err || uploading} onClick={() => add(false)}>
+                {editing ? 'Update cart' : 'Add to cart'}
+              </button>
+            )}
           </div>
           {priced.err && <p className="err-text" style={{ marginTop: 8 }}>{priced.err}</p>}
         </div>

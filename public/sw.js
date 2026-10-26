@@ -1,5 +1,5 @@
 // Pastel Treats service worker: app shell offline, photos cached, data always fresh from the network.
-const VERSION = 'pt-v5'
+const VERSION = 'pt-v6'
 const SHELL = ['/', '/logo.svg', '/logo-mint.svg', '/manifest.webmanifest', '/icons/icon-192.png']
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())) })
 self.addEventListener('activate', (e) => {
@@ -16,4 +16,13 @@ self.addEventListener('fetch', (e) => {
   if (/\.(js|css|svg|png|webp|jpg|woff2?)$/.test(url.pathname)) {
     e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request).then((r) => { if (r.ok) { const cp = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, cp)) } return r })))
   }
+})
+
+// Tapping a "New order" notification opens (or focuses) the baker's dashboard
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const w = list.find((c) => c.url.includes('#/admin')) || list[0]
+    return w ? w.focus() : self.clients.openWindow('./#/admin/orders')
+  }))
 })

@@ -18,10 +18,12 @@ import Tasks, { useTasks } from './Tasks.jsx'
 import Settings from './Settings.jsx'
 import Team, { DataExport } from './Team.jsx'
 import Announcements from './Announcements.jsx'
+import Reviews from './Reviews.jsx'
+import OrderAlerts from './OrderAlerts.jsx'
 
 const ACtx = createContext(null)
 export const useAdmin = () => useContext(ACtx)
-const TABLES = ['orders', 'customers', 'customer_addresses', 'occasions', 'payments', 'order_status_history', 'notification_log', 'products', 'categories', 'addons', 'time_slots', 'delivery_zones', 'blackout_dates']
+const TABLES = ['orders', 'customers', 'customer_addresses', 'occasions', 'payments', 'order_status_history', 'notification_log', 'products', 'categories', 'addons', 'time_slots', 'delivery_zones', 'blackout_dates', 'reviews']
 
 function AdminData({ children, me }) {
   const store = useStore()
@@ -29,7 +31,7 @@ function AdminData({ children, me }) {
   const [err, setErr] = useState(null)
   const reload = useCallback(async () => {
     try {
-      const rows = await Promise.all(TABLES.map((t) => api.list(t, { order: ['products', 'categories', 'addons', 'time_slots', 'delivery_zones'].includes(t) ? 'sort' : t === 'blackout_dates' ? 'day' : 'created_at', asc: t !== 'orders' })))
+      const rows = await Promise.all(TABLES.map((t) => api.list(t, { order: ['products', 'categories', 'addons', 'time_slots', 'delivery_zones'].includes(t) ? 'sort' : t === 'blackout_dates' ? 'day' : 'created_at', asc: t !== 'orders' }).catch((e) => { if (t === 'reviews') return []; throw e })))
       const next = Object.fromEntries(TABLES.map((t, i) => [t, rows[i]]))
       setDb(next)
       setErr(null)
@@ -186,7 +188,7 @@ function NotAdmin({ me, onDone }) {
 const NAV = [
   ['Today', [['', 'Overview', 'home'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcement board', 'megaphone'], ['orders', 'Orders', 'receipt'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
   ['Money', [['payments', 'Payments', 'wallet'], ['analytics', 'Sales analytics', 'chart']]],
-  ['People', [['customers', 'Customers', 'users'], ['dates', 'Special dates', 'gift'], ['segments', 'Segments', 'heart']]],
+  ['People', [['customers', 'Customers', 'users'], ['reviews', 'Reviews', 'star'], ['dates', 'Special dates', 'gift'], ['segments', 'Segments', 'heart']]],
   ['Shop', [['menu', 'Menu & pricing', 'cake'], ['settings', 'Business settings', 'settings'], ['data', 'Data & reports', 'download']]],
 ]
 
@@ -201,6 +203,7 @@ function Shell() {
     approvals: db.orders.filter((o) => (o.quote_status === 'pending' || o.needs_delivery_approval) && !['cancelled', 'refunded', 'completed'].includes(o.status)).length,
     payments: db.payments.filter((p) => p.status === 'pending').length,
     tasks: tasks.filter((t) => !t.done).length,
+    reviews: (db.reviews || []).filter((r) => !r.approved).length,
   }
   return (
     <div className="admin">
@@ -228,6 +231,7 @@ function Shell() {
           ))}
         </nav>
         <main className="admin-main">
+          <OrderAlerts />
           <Routes>
             <Route index element={<Overview />} />
             <Route path="tasks" element={<Tasks />} />
@@ -238,6 +242,7 @@ function Shell() {
             <Route path="payments" element={<Payments />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="customers" element={<Customers />} />
+            <Route path="reviews" element={<Reviews />} />
             <Route path="dates" element={<SpecialDates />} />
             <Route path="segments" element={<Segments />} />
             <Route path="menu" element={<MenuAdmin />} />

@@ -50,7 +50,7 @@ const chouxP = (await db.query(`select id from products where name = 'Choux Past
 const slots = (await db.query(`select id, label, capacity from time_slots order by sort`)).rows
 
 // 1. public can browse menu, not private data
-ok('1 anon can browse menu', (await asAnon('select count(*)::int n from products')).rows[0].n === 23)
+ok('1 anon can browse menu', (await asAnon('select count(*)::int n from products')).rows[0].n === 29)
 ok('20 anon cannot read orders/customers', (await asAnon('select count(*)::int n from customers')).rows[0].n === 0)
 
 // 2. pricing (cakes priced per kg by flavour)
@@ -265,6 +265,60 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   const fake = (await asAnon('select get_order_by_link($1) r', ['abcdef1234567890'])).rows[0].r
   const short = (await asAnon('select get_order_by_link($1) r', ['ab'])).rows[0].r
   ok('private order link works, fake links don\'t', r.link_token?.length === 14 && viaLink.order_number === r.order_number && viaLink.phone === '+919300022233' && /NOT_FOUND/.test(fake.error) && /NOT_FOUND/.test(short.error), r.link_token)
+}
+
+
+// courier: no time slot needed, UPI only
+{
+  const addr = { line: '1 Test St', city: 'Chennai', pincode: '600001' }
+  const bItem = { product_id: brownieP.id, qty: 1, weight: '8 pieces', flavour: 'Classic' }
+  const r = (await asAnon('select place_order($1) r', [{ ...base, phone: '93000 33344', fulfilment: 'courier', items: [bItem], date: openDay(5), slot_id: null, idempotency_key: 'cn1', address: addr }])).rows[0].r
+  const row = (await db.query(`select slot_id, slot_label from orders where order_number = $1`, [r.order_number])).rows[0]
+  const cash = await err(() => asAnon('select place_order($1) r', [{ ...base, phone: '93000 33355', fulfilment: 'courier', payment_method: 'cash', items: [bItem], date: openDay(5), idempotency_key: 'cn2', address: addr }]))
+  ok('courier order needs no time slot; cash refused for courier', !!r.order_number && row.slot_id === null && row.slot_label === 'Courier dispatch' && /UPI/.test(cash || ''), cash)
+}
+
+// names saved in CAPITALS
+{
+  const r = (await asAnon('select place_order($1) r', [{ ...base, phone: '93000 44455', name: '  priya Ramesh ', idempotency_key: 'cap1', date: openDay(9), slot_id: slots[3].id }])).rows[0].r
+  const o = (await db.query(`select customer_name from orders where order_number = $1`, [r.order_number])).rows[0]
+  const c = (await db.query(`select name from customers where phone = '+919300044455'`)).rows[0]
+  ok('customer names stored in CAPITALS', o.customer_name === 'PRIYA RAMESH' && c.name === 'PRIYA RAMESH', o.customer_name)
+}
+
+// hampers / seasonal are "message to order" — can't be placed through the cart
+{
+  const h = (await db.query(`select id from products where name = 'Corporate Gift Hamper'`)).rows[0]
+  const e = await err(() => asAnon('select quote_order($1) r', [{ items: [{ product_id: h.id, qty: 1 }], fulfilment: 'pickup' }]))
+  ok('hamper is message-to-order only', /WhatsApp/.test(e || ''), e)
+}
+
+// reviews: only a real, handed-over order can be reviewed, once; hidden until approved
+{
+  const r = (await asAnon('select place_order($1) r', [{ ...base, phone: '93000 55566', name: 'Kavya S', idempotency_key: 'rv1', date: openDay(10), slot_id: slots[3].id }])).rows[0].r
+  const early = await err(() => asAnon('select submit_review($1, 5, $2)', [r.link_token, 'Lovely cake']))
+  const fake = (await asAnon('select submit_review($1, 5, $2) r', ['ffffffffffffffff', 'Fake review'])).rows[0].r
+  await db.query(`update orders set status = 'completed' where order_number = $1`, [r.order_number])
+  const v = (await asAnon('select submit_review($1, 5, $2) r', [r.link_token, 'Lovely cake, everyone loved it!'])).rows[0].r
+  const twice = await err(() => asAnon('select submit_review($1, 4, $2)', [r.link_token, 'Again']))
+  const before = (await asAnon('select get_public_reviews() r')).rows[0].r
+  const anonRead = (await asAnon('select count(*)::int n from reviews')).rows[0].n
+  const anonApprove = await asAnon(`update reviews set approved = true returning id`)
+  await asUser(ADMIN, AC, `update reviews set approved = true`)
+  const after = (await asAnon('select get_public_reviews() r')).rows[0].r
+  ok('reviews: only after hand-over, once, hidden until baker approves',
+    /handed over/.test(early || '') && /NOT_FOUND/.test(fake.error) && v.review?.rating === 5 && /already/.test(twice || '') &&
+    before.length === 0 && anonRead === 0 && anonApprove.rows.length === 0 && after.length === 1 && after[0].name === 'Kavya' && after[0].order_number === r.order_number,
+    JSON.stringify(after[0] || {}))
+}
+
+// the 009 update runs cleanly on the existing database (twice)
+{
+  const e1 = await err(() => db.exec(readFileSync('supabase/migrations/009_reviews_hampers_menu.sql', 'utf8')))
+  const e2 = await err(() => db.exec(readFileSync('supabase/migrations/009_reviews_hampers_menu.sql', 'utf8')))
+  const n = (await db.query(`select count(*)::int n from products where name ilike '%hamper%'`)).rows[0].n
+  const prot = (await db.query(`select description from products where name = 'Protein Brownie / Cookie'`)).rows[0].description
+  ok('009 update is safe to run (twice)', e1 === null && e2 === null && n === 4 && /NO flour/.test(prot), e1 || e2)
 }
 
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')

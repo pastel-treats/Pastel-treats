@@ -10,7 +10,7 @@ const monthEnd = (iso) => { const [y, m] = iso.split('-').map(Number); return `$
 const shiftMonth = (iso, n) => { const [y, m] = iso.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-01` }
 
 // Month calendar that asks the server which dates/slots are bookable
-export default function Calendar({ productIds, mode, date, slotId, onChange, tz, maxMonthsAhead = 4, onMeta }) {
+export default function Calendar({ productIds, mode, date, slotId, onChange, tz, maxMonthsAhead = 4, onMeta, dateOnly = false }) {
   const today = todayISO(tz)
   const [month, setMonth] = useState(monthStart(date || today))
   const [av, setAv] = useState(null)
@@ -45,7 +45,7 @@ export default function Calendar({ productIds, mode, date, slotId, onChange, tz,
 
   return (
     <div className="cal">
-      {av && <div className="notice info small" style={{ marginBottom: 12 }}><Icon name="clock" size={18} /><div>Please place your order <b>{leadLabel(av.lead_hours)}</b>. Earliest available: <b>{(() => { const d = av.days.find((x) => x.available); const sl = d?.slots.find((x) => x.eligible); return d ? `${fmtDate(d.date, { weekday: true })}, ${sl.label}` : fmtWall(av.earliest) })()}</b>.</div></div>}
+      {av && <div className="notice info small" style={{ marginBottom: 12 }}><Icon name="clock" size={18} /><div>Please place your order <b>{leadLabel(av.lead_hours)}</b>. Earliest available: <b>{(() => { const d = av.days.find((x) => x.available); const sl = d?.slots.find((x) => x.eligible); return d ? (dateOnly ? fmtDate(d.date, { weekday: true }) : `${fmtDate(d.date, { weekday: true })}, ${sl.label}`) : fmtWall(av.earliest) })()}</b>.</div></div>}
       <div className="cal-head">
         <button className="cal-nav" disabled={!canPrev} onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month"><Icon name="left" size={18} /></button>
         <div className="m">{MONTHS_LONG[m - 1]} {y}</div>
@@ -69,7 +69,8 @@ export default function Calendar({ productIds, mode, date, slotId, onChange, tz,
           })}
         </div>
       )}
-      {selDay && (
+      {selDay && dateOnly && <p className="small" style={{ marginTop: 12 }}>📦 We’ll dispatch your courier on <b>{fmtDate(date, { weekday: true })}</b>. No time slot needed.</p>}
+      {selDay && !dateOnly && (
         <div style={{ marginTop: 14 }} className="fade-in">
           <div className="small" style={{ fontWeight: 500, marginBottom: 8 }}>Choose a time slot</div>
           <div className="slots">

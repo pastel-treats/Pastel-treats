@@ -89,6 +89,7 @@ function ProductEditor({ product, onClose }) {
             <Switch checked={p.is_available} onChange={set('is_available')} label="Available to order (off = “sold out”)" />
             <Switch checked={p.is_featured} onChange={set('is_featured')} label="Featured on the home page" />
             <Switch checked={p.courier_ok} onChange={set('courier_ok')} label="Can be sent by courier" />
+            <Switch checked={!!p.enquiry_only} onChange={set('enquiry_only')} label="Message to order (no cart — customers WhatsApp you; for hampers, seasonal, price on request)" />
             <Switch checked={p.allow_message} onChange={set('allow_message')} label="Allow message, add-ons & personalisation" />
             <Switch checked={p.customizable} onChange={set('customizable')} label="Allow custom design requests & reference photos" />
           </div>

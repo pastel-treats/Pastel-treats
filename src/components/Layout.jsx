@@ -73,7 +73,7 @@ export default function Layout() {
         <NavLink to="/" end><Icon name="home" />Home</NavLink>
         <NavLink to="/menu"><Icon name="cake" />Menu</NavLink>
         <NavLink to="/cart"><Icon name="bag" />{n > 0 && <span className="count">{n}</span>}Cart</NavLink>
-        <NavLink to="/track"><Icon name="receipt" />Orders</NavLink>
+        <NavLink to="/track"><Icon name="receipt" />My orders</NavLink>
         <NavLink to="/contact"><Icon name="phone" />Contact</NavLink>
       </nav>
 

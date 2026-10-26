@@ -216,7 +216,7 @@ export default function Customers() {
             const phone = normalizePhone(nc.phone)
             if (!nc.name.trim() || !phone) return toast('Name and a valid mobile are needed', true)
             if (db.customers.some((c) => c.phone === phone)) return toast('A customer with this number already exists', true)
-            try { await api.insert('customers', { name: nc.name.trim(), phone, whatsapp: phone }); setNc({ name: '', phone: '' }); setAdding(false); reload() } catch (e) { toast(cleanError(e), true) }
+            try { await api.insert('customers', { name: nc.name.trim().toUpperCase(), phone, whatsapp: phone }); setNc({ name: '', phone: '' }); setAdding(false); reload() } catch (e) { toast(cleanError(e), true) }
           }}>Save</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
         </div>

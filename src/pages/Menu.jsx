@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useStore } from '../store.jsx'
 import ProductCard from '../components/ProductCard.jsx'
 import { Empty, Icon } from '../components/ui.jsx'
+import TalkBaker from '../components/TalkBaker.jsx'
 
 export default function Menu() {
   const { data } = useStore()
@@ -50,10 +51,7 @@ export default function Menu() {
       ) : (
         <Empty title="Nothing here yet">Try another category, or <Link to="/contact">ask us</Link> — we love a custom request.</Empty>
       )}
-      <div className="notice info" style={{ marginTop: 28 }}>
-        <Icon name="sparkle" size={20} />
-        <div>Cakes and cupcakes can be customised. Don’t see what you want? <Link to="/menu/custom-cakes">Request a custom cake</Link>.</div>
-      </div>
+      <TalkBaker style={{ marginTop: 28 }} title="Request a custom cake 🎂" sub="Don’t see what you want? Message or call the baker with your idea — we love a custom request." />
     </div>
   )
 }

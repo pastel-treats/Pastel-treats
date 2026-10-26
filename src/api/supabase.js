@@ -39,6 +39,8 @@ export function createLiveApi(url, key) {
     },
     getOrder: (number, phone) => rpcJson('get_order', { p_number: number, p_phone: phone }),
     getOrderByLink: (token) => rpcJson('get_order_by_link', { p_token: token }),
+    submitReview: (token, rating, body) => rpcJson('submit_review', { p_token: token, p_rating: rating, p_body: body }),
+    publicReviews: () => rpcJson('get_public_reviews', {}),
     submitProof: (number, phone, reference, path, amount) =>
       rpcJson('submit_payment_proof', { p_number: number, p_phone: phone, p_reference: reference, p_proof_path: path, p_amount: amount }),
 
