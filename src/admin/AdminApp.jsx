@@ -21,11 +21,13 @@ import Announcements from './Announcements.jsx'
 import Reviews from './Reviews.jsx'
 import OrderAlerts from './OrderAlerts.jsx'
 import ShopStatus from './ShopStatus.jsx'
-import { ordersClosed } from '../lib/announcements.js'
+import PhoneAlerts from './PhoneAlerts.jsx'
+import Enquiries from './Enquiries.jsx'
+import { ordersClosed, notYetOpen } from '../lib/announcements.js'
 
 const ACtx = createContext(null)
 export const useAdmin = () => useContext(ACtx)
-const TABLES = ['orders', 'customers', 'customer_addresses', 'occasions', 'payments', 'order_status_history', 'notification_log', 'products', 'categories', 'addons', 'time_slots', 'delivery_zones', 'blackout_dates', 'reviews']
+const TABLES = ['orders', 'customers', 'customer_addresses', 'occasions', 'payments', 'order_status_history', 'notification_log', 'products', 'categories', 'addons', 'time_slots', 'delivery_zones', 'blackout_dates', 'reviews', 'enquiries']
 
 function AdminData({ children, me }) {
   const store = useStore()
@@ -33,7 +35,7 @@ function AdminData({ children, me }) {
   const [err, setErr] = useState(null)
   const reload = useCallback(async () => {
     try {
-      const rows = await Promise.all(TABLES.map((t) => api.list(t, { order: ['products', 'categories', 'addons', 'time_slots', 'delivery_zones'].includes(t) ? 'sort' : t === 'blackout_dates' ? 'day' : 'created_at', asc: t !== 'orders' }).catch((e) => { if (t === 'reviews') return []; throw e })))
+      const rows = await Promise.all(TABLES.map((t) => api.list(t, { order: ['products', 'categories', 'addons', 'time_slots', 'delivery_zones'].includes(t) ? 'sort' : t === 'blackout_dates' ? 'day' : 'created_at', asc: t !== 'orders' }).catch((e) => { if (t === 'reviews' || t === 'enquiries') return []; throw e })))
       const next = Object.fromEntries(TABLES.map((t, i) => [t, rows[i]]))
       setDb(next)
       setErr(null)
@@ -190,11 +192,12 @@ function NotAdmin({ me, onDone }) {
 function ShopPill() {
   const { settings } = useAdmin()
   const closed = ordersClosed(settings)
-  return <Link to="/admin/shop" className={'shop-pill ' + (closed ? 'closed' : 'open')} title={closed ? 'Orders closed — tap to open' : 'Taking orders — tap to close'}>{closed ? '🔴 Closed' : '🟢 Open'}</Link>
+  const soon = notYetOpen(settings)
+  return <Link to="/admin/shop" className={'shop-pill ' + (closed ? 'closed' : 'open')} title={closed ? 'Orders closed — tap to open' : 'Taking orders — tap to close'}>{soon ? '⏳ Opens soon' : closed ? '🔴 Closed' : '🟢 Open'}</Link>
 }
 
 const NAV = [
-  ['Today', [['', 'Overview', 'home'], ['shop', 'Open / close orders', 'power'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcements & pop-ups', 'megaphone'], ['orders', 'Orders', 'receipt'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
+  ['Today', [['', 'Overview', 'home'], ['shop', 'Open / close orders', 'power'], ['alerts', 'Phone alerts', 'bell'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcements & pop-ups', 'megaphone'], ['orders', 'Orders', 'receipt'], ['enquiries', 'Hampers & enquiries', 'gift'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
   ['Money', [['payments', 'Payments', 'wallet'], ['analytics', 'Sales analytics', 'chart']]],
   ['People', [['customers', 'Customers', 'users'], ['reviews', 'Reviews', 'star'], ['dates', 'Special dates', 'gift'], ['segments', 'Segments', 'heart']]],
   ['Shop', [['menu', 'Menu & pricing', 'cake'], ['settings', 'Business settings', 'settings'], ['data', 'Data & reports', 'download']]],
@@ -213,6 +216,7 @@ function Shell() {
     tasks: tasks.filter((t) => !t.done).length,
     reviews: (db.reviews || []).filter((r) => !r.approved).length,
     shop: ordersClosed(settings) ? '!' : 0,
+    enquiries: (db.enquiries || []).filter((e) => e.status === 'new').length,
   }
   return (
     <div className="admin">
@@ -246,6 +250,8 @@ function Shell() {
             <Route index element={<Overview />} />
             <Route path="tasks" element={<Tasks />} />
             <Route path="shop" element={<ShopStatus />} />
+            <Route path="enquiries" element={<Enquiries />} />
+            <Route path="alerts" element={<PhoneAlerts />} />
             <Route path="announcements" element={<Announcements />} />
             <Route path="orders" element={<Orders />} />
             <Route path="approvals" element={<Orders preset="approvals" />} />

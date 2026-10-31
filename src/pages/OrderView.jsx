@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import PhoneInput from '../components/PhoneInput.jsx'
 import { upiAppLinks } from '../components/UpiPayBox.jsx'
+import { checkUpiScreenshot } from '../lib/upiCheck.js'
 import { useStore } from '../store.jsx'
 import { api } from '../api/index.js'
 import { inr, cleanError, itemSummary, statusLabel, STATUS_FLOW } from '../lib/format.js'
@@ -28,6 +29,10 @@ export function PaymentPanel({ o, phone, onPaid }) {
   const [big, setBig] = useState(false)
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [perr, setPerr] = useState(null)
+  const [fails, setFails] = useState(0)
+  const [pnote, setPnote] = useState('')
   const [busy, setBusy] = useState(false)
   const pendingAmt = (o.payments || []).filter((p) => p.status === 'pending' && p.kind !== 'refund').reduce((a, p) => a + p.amount, 0)
   const covered = o.amount_paid + pendingAmt
@@ -42,12 +47,21 @@ export function PaymentPanel({ o, phone, onPaid }) {
   if (['cancelled', 'refunded', 'refund_pending', 'completed'].includes(o.status) || due <= 0) return null
   if (o.payment_method === 'cash' && o.amount_paid === 0) return <div className="notice info"><Icon name="wallet" size={20} /><div>You chose <b>cash</b>. Please pay {inr(o.total)} at {o.fulfilment === 'pickup' ? 'pickup' : 'delivery'}. We’ll confirm your order on WhatsApp.</div></div>
 
-  async function sendProof(f = file) {
+  async function sendProof(f = file, force = false) {
     if (!f) return toast('Please upload the payment screenshot', true)
+    setPerr(null)
+    let note = pnote
+    if (!force) {
+      setChecking(true)
+      const r = await checkUpiScreenshot(f, due, { payee: [s.upi_id, s.upi_name, s.baker_name] })
+      setChecking(false)
+      if (!r.ok) { setPerr(r.reason); setFails((n) => n + 1); setPnote(r.note); return }
+      note = r.note
+    } else note = 'Customer confirmed it is their payment — auto-check did not match (' + (pnote || 'no details') + ')'
     setBusy(true)
     try {
       const path = await api.uploadFile('proof', await compressImage(f, 1400))
-      await api.submitProof(o.order_number, phone, `${o.order_number}-${Math.round(Date.now() / 60000)}`, path, due)
+      await api.submitProof(o.order_number, phone, `${o.order_number}-${Math.round(Date.now() / 60000)}`, path, due, note)
       toast('Thank you! Your payment screenshot was sent to the baker.')
       setFile(null); setPreview(null); onPaid()
     } catch (e) { toast(cleanError(e), true) } finally { setBusy(false) }
@@ -108,10 +122,14 @@ export function PaymentPanel({ o, phone, onPaid }) {
           <label className="proof-drop">
             <input type="file" accept={ACCEPT_IMG} hidden disabled={busy} onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) { setFile(f); setPreview(URL.createObjectURL(f)); sendProof(f) } }} />
             {preview ? <img src={preview} alt="Your payment screenshot" className="proof-prev" /> : <span className="big" aria-hidden="true">📸</span>}
-            <b>{busy ? 'Sending…' : 'After paying, upload the screenshot'}</b>
-            <span className="tiny muted">It goes straight to the baker — no forms to fill.</span>
+            <b>{checking ? 'Checking your screenshot…' : busy ? 'Sending…' : 'After paying, upload the screenshot'}</b>
+            <span className="tiny muted">{checking ? `Making sure it’s your UPI payment of ${inr(due)}` : 'Only the UPI “Payment successful” screenshot is accepted'}</span>
           </label>
-          {file && !busy && <button className="btn btn-primary btn-block" onClick={() => sendProof()}>Send screenshot again</button>}
+          {perr && (
+            <div className="notice warn small" role="alert">{perr}
+              {fails >= 2 && file && <div style={{ marginTop: 8 }}><button type="button" className="btn btn-white btn-sm" onClick={() => sendProof(file, true)}>This is my real payment screenshot — send it to the baker</button></div>}
+            </div>
+          )}
         </div>
       ) : (
         <div className="notice warn small">The bakery hasn’t added its UPI details yet. Please contact us on WhatsApp to pay.</div>
@@ -121,7 +139,7 @@ export function PaymentPanel({ o, phone, onPaid }) {
   return (
     <div className="card" id="pay">
       {dueAdvance > 0 ? (
-        <><div className="card-title">Pay your advance: {inr(due)}</div>{body}</>
+        <><div className="card-title">{o.advance_due >= o.total ? 'Pay for your order' : 'Pay your advance'}: {inr(due)}</div>{body}</>
       ) : (
         <details className="pay-help">
           <summary><b>Want to pay the balance of {inr(due)} now by UPI?</b> <span className="tiny muted">(optional — you can also pay {o.fulfilment === 'pickup' ? 'at pickup' : 'later'})</span></summary>
@@ -156,7 +174,7 @@ export function PaymentSummary({ o }) {
       {pays.map((p, i) => (
         <div className="row-pay" key={i}>
           <div>
-            <b>{p.kind === 'balance' ? 'Balance' : 'Advance'} paid · {inr(p.amount)}</b>
+            <b>{p.amount >= o.total ? 'Paid in full' : p.kind === 'balance' ? 'Balance paid' : 'Advance paid'} · {inr(p.amount)}</b>
             <div className="tiny muted">{fmtDateTime(p.at)} · {p.method === 'cash' ? 'Cash' : 'UPI'}</div>
           </div>
           {p.status === 'verified' ? <span className="badge t-mint">✓ Received</span> : <span className="badge t-butter">Checking</span>}
@@ -194,7 +212,7 @@ export function OrderDetails({ o }) {
         <div className="ln"><span>{o.fulfilment === 'courier' ? 'Courier' : 'Collection'}</span><span>{o.fulfilment === 'pickup' ? 'Self pickup' : inr(o.delivery_charge)}</span></div>
         {o.discount > 0 && <div className="ln"><span>Discount</span><span>−{inr(o.discount)}</span></div>}
         <div className="ln total"><span>Total</span><span>{inr(o.total)}</span></div>
-        <div className="ln"><span>Advance required</span><span>{inr(o.advance_due)}</span></div>
+        <div className="ln"><span>{o.advance_due >= o.total ? 'Payment required (full)' : 'Advance required'}</span><span>{inr(o.advance_due)}</span></div>
         <div className="ln"><span>Paid so far{paymentTotals(o).pending ? ' (incl. being checked)' : ''}</span><span>{inr(paymentTotals(o).paid)}</span></div>
         <div className="ln" style={{ fontWeight: 600 }}><span>Balance to pay</span><span>{inr(paymentTotals(o).balance)}</span></div>
       </div>
@@ -273,7 +291,7 @@ function ReviewBox({ o, onDone }) {
 export default function OrderView() {
   const { number } = useParams()
   const [sp] = useSearchParams()
-  const { myOrders, rememberOrder, settings: s, data } = useStore()
+  const { myOrders, rememberOrder, forgetOrder, settings: s, data } = useStore()
   const known = myOrders.find((x) => x.number === number)
   const [phone, setPhone] = useState(known?.phone || '')
   const [o, setO] = useState(null)
@@ -293,7 +311,11 @@ export default function OrderView() {
         items: (r.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '),
         total: r.total, date: r.confirmed_date || r.requested_date, status: r.status, fulfilment: r.fulfilment, link_token: r.link_token,
       })
-    } catch (e) { setErr(cleanError(e)) } finally { setLoading(false) }
+    } catch (e) {
+      // an old test order that was cleared by the bakery: take it off this phone's list
+      if (/NOT_FOUND/.test(e?.message || '') && known) { forgetOrder(number); setErr('This order is no longer available. It has been removed from your list.') }
+      else setErr(cleanError(e))
+    } finally { setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [number, phone])
   useEffect(() => { if (known) load(known.phone) /* eslint-disable-next-line */ }, [number])
@@ -327,12 +349,12 @@ export default function OrderView() {
         <div className="card center fade-in" style={{ background: 'var(--mint)', marginBottom: 16 }}>
           <svg className="success-art" viewBox="0 0 96 96" aria-hidden="true"><circle cx="48" cy="48" r="44" fill="#fff" /><path d="m30 49 12 12 25-26" stroke="#20543f" strokeWidth="6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
           <h2 style={{ marginTop: 10 }}>Thank you, {first(o.customer_name)}!</h2>
-          <p style={{ margin: '6px 0 0' }}>{paidNow ? <>Your advance of <b>{inr(paidNow)}</b> is paid and <b>your order is placed</b>. 🎉</> : 'Your order request has been received.'}</p>
+          <p style={{ margin: '6px 0 0' }}>{paidNow ? <>Your {paidNow >= o.total ? 'payment' : 'advance'} of <b>{inr(paidNow)}</b> is done and <b>your order is placed</b>. 🎉</> : 'Your order request has been received.'}</p>
           <div className="card flat" style={{ margin: '12px auto 0', maxWidth: 360, background: '#fff' }}>
             <div className="tiny muted">Order ID</div>
             <div className="serif" style={{ fontSize: '1.7rem', fontWeight: 700, color: 'var(--forest)', letterSpacing: '0.02em' }}>{o.order_number}</div>
             <div className="small muted">Mobile {prettyPhone(phone || known?.phone)}</div>
-            {paidNow > 0 && <div className="small" style={{ marginTop: 6 }}>Advance paid <b>{inr(paidNow)}</b> · Balance <b>{inr(paymentTotals(o).balance)}</b></div>}
+            {paidNow > 0 && <div className="small" style={{ marginTop: 6 }}>{paidNow >= o.total ? <>Paid in full <b>{inr(paidNow)}</b> · nothing more to pay</> : <>Advance paid <b>{inr(paidNow)}</b> · Balance <b>{inr(paymentTotals(o).balance)}</b></>}</div>}
           </div>
           {s.whatsapp && <a className="btn btn-primary" style={{ marginTop: 12 }} href={waLink(s.whatsapp, orderMessage(o, phone || known?.phone))} target="_blank" rel="noreferrer"><WaIcon size={18} /> Send my order details on WhatsApp</a>}
           <p className="small" style={{ margin: '4px 0 0' }}>{paidNow ? 'The baker checks the payment and confirms your order on WhatsApp.' : o.status === 'awaiting_payment' ? 'Pay the advance below to secure your slot.' : 'The baker will review it and message you on WhatsApp.'}</p>

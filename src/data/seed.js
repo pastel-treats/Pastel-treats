@@ -40,8 +40,8 @@ export const SEED_SETTINGS = {
   courier_enabled: true,
   courier_note: 'Brownies, blondies, cookie boxes and ragi puffs can be sent by courier. Courier charges are extra — we confirm them before you pay.',
   advance_mode: 'percent', // 'percent' | 'fixed'
-  advance_value: 50,
-  advance_tier_enabled: false, // orders above advance_tier_above use their own advance rule
+  advance_value: 100,
+  advance_tier_enabled: true, // orders above advance_tier_above use their own advance rule
   advance_tier_above: 1000,
   advance_tier_mode: 'percent',
   advance_tier_value: 50,
@@ -59,7 +59,7 @@ export const SEED_SETTINGS = {
   policies: {
     ordering:
       'Please order 48 hrs (2 days) prior to your pickup time. Submitting an order is a request — it is confirmed only after we review it and receive the advance.',
-    advance: 'A 50% advance confirms your order. The balance is paid at pickup.',
+    advance: 'Orders below ₹1,000 are paid in full when you order. For orders of ₹1,000 and above, a 50% advance confirms your order and the balance is paid at pickup (or before courier dispatch).',
     pickup:
       'All orders are self pickup from our location (see the map link) at the time slot you choose. Please arrive within your slot and message us on WhatsApp when you reach.',
     delivery:

@@ -1,10 +1,11 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { NavLink, Link, Outlet, useLocation } from 'react-router-dom'
 import { useStore } from '../store.jsx'
 import { Icon, WaIcon } from './ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 import { isDemo } from '../api/index.js'
-import { activeAnnouncements, KINDS, ordersClosed, closedMessage } from '../lib/announcements.js'
+import { activeAnnouncements, KINDS, ordersClosed, closedMessage, notYetOpen, opensAtMs } from '../lib/announcements.js'
+import { wallNow } from '../lib/dates.js'
 import { fmtDate } from '../lib/dates.js'
 import AnnouncementPopup from './AnnouncementPopup.jsx'
 
@@ -14,11 +15,22 @@ export default function Layout() {
   const { pathname } = useLocation()
   const n = cart.length
   const hideFab = /^\/(checkout|cake|cart)/.test(pathname)
+  // before the opening time, refresh every second (countdown) so ordering switches on by itself at the exact time
+  const waiting = notYetOpen(s)
+  const [, tick] = useState(0)
+  useEffect(() => { if (!waiting) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [waiting])
+  const left = waiting ? Math.max(0, opensAtMs(s) - wallNow(s.timezone)) : 0
+  const cd = [Math.floor(left / 864e5), Math.floor(left / 36e5) % 24, Math.floor(left / 6e4) % 60, Math.floor(left / 1e3) % 60]
   const top = activeAnnouncements(s)[0]
   return (
     <div className="has-tabbar">
       {isDemo && <div className="demo-bar">Demo mode — orders are saved only on this device until the bakery database is connected.</div>}
-      {ordersClosed(s) ? <div className="promo" style={{ background: 'var(--rose-deep)' }}>⏸️ {closedMessage(s)}{s.orders_paused_until ? ` · Orders open again on ${fmtDate(s.orders_paused_until)}` : ''}</div>
+      {waiting ? (
+        <div className="promo countdown" role="status">
+          <span>🎂 Online orders open {closedMessage(s).replace('Online orders open on ', '').replace(' See you then!', '')}</span>
+          <span className="cd">{cd[0] > 0 && <><b>{cd[0]}</b>d </>}<b>{String(cd[1]).padStart(2, '0')}</b>h <b>{String(cd[2]).padStart(2, '0')}</b>m <b>{String(cd[3]).padStart(2, '0')}</b>s</span>
+        </div>
+      ) : ordersClosed(s) ? <div className="promo" style={{ background: 'var(--rose-deep)' }}>⏸️ {closedMessage(s)}{!notYetOpen(s) && s.orders_paused_until ? ` · Orders open again on ${fmtDate(s.orders_paused_until)}` : ''}</div>
         : top ? <Link to="/" className="promo" style={{ display: 'block', textDecoration: 'none' }}>{KINDS[top.kind]?.icon} {top.title}{top.message ? ` — ${top.message}` : ''}</Link>
         : s.promo_banner && <div className="promo">{s.promo_banner}</div>}
       <header className="topbar">

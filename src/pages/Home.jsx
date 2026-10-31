@@ -5,10 +5,11 @@ import ProductCard from '../components/ProductCard.jsx'
 import { Icon, WaIcon } from '../components/ui.jsx'
 import { waLink } from '../lib/contact.js'
 import { leadLabel } from '../lib/format.js'
-import { activeAnnouncements, KINDS, ordersClosed, closedMessage } from '../lib/announcements.js'
+import { activeAnnouncements, KINDS, ordersClosed, closedMessage, notYetOpen } from '../lib/announcements.js'
 import { fmtDate } from '../lib/dates.js'
 import { LocationCard, MeetBaker } from './Info.jsx'
 import { InstallBanner } from './GetApp.jsx'
+import LaunchCountdown from '../components/LaunchCountdown.jsx'
 import { api } from '../api/index.js'
 
 const KITCHEN = [
@@ -63,6 +64,7 @@ export default function Home() {
 
   return (
     <>
+      <LaunchCountdown />
       <section className="hero">
         <div className="wrap">
           <div className="fade-in">
@@ -76,10 +78,10 @@ export default function Home() {
               <Link to={custom ? `/cake/${custom.id}` : '/menu/custom-cakes'} className="btn btn-white">Create your custom cake</Link>
               {s.whatsapp && <a className="btn btn-soft" href={waLink(s.whatsapp, 'Hi Pastel Treats! I have a question.')} target="_blank" rel="noreferrer" aria-label="Questions on WhatsApp"><WaIcon size={20} /> Questions?</a>}
             </div>
-            <div className="row small" style={{ marginTop: 18, color: '#2f5a49', gap: 16, flexWrap: 'wrap' }}>
-              <span className="row" style={{ gap: 6 }}><Icon name="clock" size={18} /> Order {leadLabel(s.lead_time_hours)}</span>
-              <span className="row" style={{ gap: 6 }}><Icon name="heart" size={18} /> Baked fresh to order</span>
-              <span className="row" style={{ gap: 6 }}><Icon name="sparkle" size={18} /> Self pickup · courier for brownies & cookies</span>
+            <div className="hero-badges">
+              <span className="hb hb-time"><Icon name="clock" size={18} /> Order {leadLabel(s.lead_time_hours)}</span>
+              <span className="hb hb-fresh"><Icon name="heart" size={18} /> Baked fresh to order</span>
+              <span className="hb hb-ship"><Icon name="truck" size={18} /> Self pickup · courier for brownies & cookies</span>
             </div>
           </div>
           <div className="hero-art fade-in">
@@ -97,7 +99,7 @@ export default function Home() {
         <section className="wrap" id="news" style={{ paddingTop: 24 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Announcements</div>
           <div className="stack">
-            {ordersClosed(s) && <div className="card" style={{ background: 'var(--pink)' }}><b className="serif" style={{ fontSize: '1.3rem', color: 'var(--rose-deep)' }}>⏸️ Not taking new orders right now</b><p style={{ margin: '4px 0 0' }}>{closedMessage(s)}{s.orders_paused_until ? ` Orders open again on ${fmtDate(s.orders_paused_until, { weekday: true })}.` : ''}</p></div>}
+            {ordersClosed(s) && <div className="card" style={{ background: notYetOpen(s) ? 'var(--mint-wash)' : 'var(--pink)' }}><b className="serif" style={{ fontSize: '1.3rem', color: 'var(--rose-deep)' }}>{notYetOpen(s) ? '🎂 Online orders open soon' : '⏸️ Not taking new orders right now'}</b><p style={{ margin: '4px 0 0' }}>{closedMessage(s)}{!notYetOpen(s) && s.orders_paused_until ? ` Orders open again on ${fmtDate(s.orders_paused_until, { weekday: true })}.` : ''}{notYetOpen(s) ? ' You can browse the menu and plan your order now.' : ''}</p></div>}
             {news.map((a) => (
               <div key={a.id} className="card" style={{ background: a.kind === 'closed' ? 'var(--pink)' : a.kind === 'leave' ? 'var(--peach)' : a.kind === 'offer' ? 'var(--butter)' : 'var(--mint-wash)' }}>
                 <div className="tiny muted">{KINDS[a.kind]?.icon} {KINDS[a.kind]?.label}{a.from ? ` · ${fmtDate(a.from)}${a.to && a.to !== a.from ? ' – ' + fmtDate(a.to) : ''}` : ''}</div>

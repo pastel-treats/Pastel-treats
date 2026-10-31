@@ -119,13 +119,13 @@ export default function Settings() {
         </>}
         {tab === 'payments' && <>
           <div className="grid-2">
-            <Field label="Advance type"><select className="input" value={s.advance_mode} onChange={set('advance_mode')}><option value="percent">Percentage of total</option><option value="fixed">Fixed amount</option></select></Field>
-            <Field label={s.advance_mode === 'fixed' ? 'Advance amount ₹' : 'Advance %'}><input className="input" type="number" value={s.advance_value} onChange={set('advance_value')} /></Field>
+            <Field label={s.advance_tier_enabled ? 'Smaller orders: advance type' : 'Advance type'}><select className="input" value={s.advance_mode} onChange={set('advance_mode')}><option value="percent">Percentage of total</option><option value="fixed">Fixed amount</option></select></Field>
+            <Field label={(s.advance_mode === 'fixed' ? 'Advance amount ₹' : 'Advance %') + (s.advance_mode === 'fixed' ? '' : ' (100 = full payment)')}><input className="input" type="number" value={s.advance_value} onChange={set('advance_value')} /></Field>
           </div>
           <div className="tier-box stack">
-            <Switch checked={!!s.advance_tier_enabled} onChange={set('advance_tier_enabled')} label="Different advance for bigger orders" />
+            <Switch checked={!!s.advance_tier_enabled} onChange={set('advance_tier_enabled')} label="Different advance for bigger orders (e.g. full payment below ₹1,000, 50% from ₹1,000)" />
             {s.advance_tier_enabled && <>
-              <Field label="For orders above ₹"><input className="input" type="number" min={0} value={s.advance_tier_above ?? 1000} onChange={set('advance_tier_above')} /></Field>
+              <Field label="For orders of ₹ … and above"><input className="input" type="number" min={0} value={s.advance_tier_above ?? 1000} onChange={set('advance_tier_above')} /></Field>
               <div className="grid-2">
                 <Field label="Advance type"><select className="input" value={s.advance_tier_mode || 'percent'} onChange={set('advance_tier_mode')}><option value="percent">Percentage of total</option><option value="fixed">Fixed amount</option></select></Field>
                 <Field label={(s.advance_tier_mode || 'percent') === 'fixed' ? 'Advance amount ₹' : 'Advance %'}><input className="input" type="number" min={0} value={s.advance_tier_value ?? 50} onChange={set('advance_tier_value')} /></Field>

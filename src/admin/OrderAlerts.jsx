@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAdmin } from './AdminApp.jsx'
 import { api } from '../api/index.js'
 import { inr, itemSummary } from '../lib/format.js'
@@ -18,21 +18,28 @@ const setPref = (v) => { try { localStorage.setItem(PREF, v) } catch { /* ignore
 // A bright two-tone "ding-dong" made in the browser (no sound file needed)
 function makeRinger() {
   let ctx = null, timer = null
+  // a loud, attention-grabbing ring: bright square + triangle tones through a compressor (as loud as the phone allows)
+  let out = null
   const ding = () => {
     if (!ctx) return
+    if (!out) { out = ctx.createDynamicsCompressor(); out.threshold.value = -10; out.ratio.value = 4; out.connect(ctx.destination) }
     const t = ctx.currentTime
-    ;[[880, 0], [1175, 0.18], [880, 0.6], [1175, 0.78]].forEach(([f, d]) => {
-      const o = ctx.createOscillator(), g = ctx.createGain()
-      o.type = 'triangle'; o.frequency.value = f
-      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.6, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.35)
-      o.connect(g).connect(ctx.destination); o.start(t + d); o.stop(t + d + 0.4)
-    })
-    navigator.vibrate?.([300, 120, 300])
+    for (let r = 0; r < 2; r++) {
+      ;[[1046, 0], [1318, 0.16], [1568, 0.32], [1318, 0.48]].forEach(([f, d]) => {
+        ;['square', 'triangle'].forEach((type) => {
+          const o = ctx.createOscillator(), g = ctx.createGain(), at = t + r * 0.8 + d
+          o.type = type; o.frequency.value = f
+          g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(type === 'square' ? 0.35 : 0.9, at + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.3)
+          o.connect(g).connect(out); o.start(at); o.stop(at + 0.32)
+        })
+      })
+    }
+    navigator.vibrate?.([500, 150, 500, 150, 800])
   }
   return {
     unlock() { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume() } catch { /* no audio */ } },
     ready: () => !!ctx && ctx.state === 'running',
-    start() { if (timer) return; ding(); timer = setInterval(ding, 2500) },
+    start() { if (timer) return; ding(); timer = setInterval(ding, 2000) },
     stop() { clearInterval(timer); timer = null; navigator.vibrate?.(0) },
     test() { ding() },
   }
@@ -96,6 +103,15 @@ export default function OrderAlerts() {
   }, [queue.length, on])
   useEffect(() => () => ringer.current.stop(), [])
 
+  // keep the screen awake while alerts are on, so the dashboard can keep ringing
+  useEffect(() => {
+    if (!on || !('wakeLock' in navigator)) return
+    let lock = null
+    const get = () => { if (document.visibilityState === 'visible') navigator.wakeLock.request('screen').then((l) => { lock = l }).catch(() => {}) }
+    get(); document.addEventListener('visibilitychange', get)
+    return () => { document.removeEventListener('visibilitychange', get); lock?.release().catch(() => {}) }
+  }, [on])
+
   async function enable() {
     ringer.current.unlock()
     ringer.current.test()
@@ -112,7 +128,7 @@ export default function OrderAlerts() {
         {on ? (
           <>
             <span className="pulse-dot" aria-hidden="true" />
-            <span className="grow small"><b>Order alerts on</b> — keep this page open; it rings for every new order.</span>
+            <span className="grow small"><b>Order alerts on</b> — this page rings for every new order. For alerts with the app closed, set up <Link to="/admin/alerts">Phone alerts</Link>.</span>
             <button className="btn btn-white btn-sm" onClick={() => ringer.current.test()}>Test sound</button>
             <button className="link-btn small" onClick={disable}>Turn off</button>
           </>

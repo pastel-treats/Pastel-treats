@@ -50,7 +50,7 @@ export function priceItem(p, sel, addonsList) {
 
 // Which advance rule applies: orders above the "bigger order" amount can have their own advance
 export function advanceRule(total, s) {
-  if (s?.advance_tier_enabled && total > (+s.advance_tier_above || 0))
+  if (s?.advance_tier_enabled && total >= (+s.advance_tier_above || 0))
     return { mode: s.advance_tier_mode || 'percent', value: +(s.advance_tier_value ?? 50) }
   return { mode: s?.advance_mode || 'percent', value: +(s?.advance_value ?? 50) }
 }

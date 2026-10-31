@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { api } from './api/index.js'
+import { notYetOpen } from './lib/announcements.js'
 
 const Ctx = createContext(null)
 const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d } catch { return d } }
@@ -26,7 +27,26 @@ export function StoreProvider({ children }) {
     }
   }, [])
   useEffect(() => { reload() }, [reload])
+  // The bakery cleared all test orders ("fresh start"): forget old orders, cart and half-filled checkout on this phone too.
+  useEffect(() => {
+    const resetAt = data?.settings?.data_reset_at
+    if (!resetAt) return
+    let seen = null
+    try { seen = localStorage.getItem('pt-reset-seen') } catch { /* private mode */ }
+    if (seen === resetAt) return
+    const cut = Date.parse(resetAt)
+    setMyOrders((m) => m.filter((o) => o.at && Date.parse(o.at) > cut))
+    setCart([])
+    try {
+      ['pt-checkout-draft', 'pt-idem', 'pt-pay-pending'].forEach((k) => sessionStorage.removeItem(k))
+      localStorage.setItem('pt-reset-seen', resetAt)
+    } catch { /* ignore */ }
+  }, [data?.settings?.data_reset_at])
   useEffect(() => write('pt-cart-v2', cart), [cart])
+  // Before the opening time, tick every second so every screen (checkout too) switches on by itself at that moment
+  const [clock, setClock] = useState(0)
+  const waiting = notYetOpen(data?.settings)
+  useEffect(() => { if (!waiting) return; const t = setInterval(() => setClock((n) => n + 1), 1000); return () => clearInterval(t) }, [waiting])
   useEffect(() => write('pt-my-orders', myOrders), [myOrders])
 
   const toast = useCallback((msg, isErr = false) => {
@@ -44,8 +64,10 @@ export function StoreProvider({ children }) {
     removeLine: (key) => setCart((c) => c.filter((l) => l.key !== key)),
     clearCart: () => setCart([]),
     myOrders,
+    forgetOrder: (number) => setMyOrders((m) => m.filter((x) => x.number !== number)),
     rememberOrder: (o) => setMyOrders((m) => [{ ...(m.find((x) => x.number === o.number) || {}), ...o }, ...m.filter((x) => x.number !== o.number)].slice(0, 30)),
-  }), [data, error, reload, toast, cart, myOrders])
+    clock,
+  }), [data, error, reload, toast, cart, myOrders, clock])
 
   return (
     <Ctx.Provider value={value}>

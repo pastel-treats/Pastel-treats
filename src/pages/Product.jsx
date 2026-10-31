@@ -4,6 +4,7 @@ import { useStore } from '../store.jsx'
 import { api } from '../api/index.js'
 import { priceItem } from '../lib/pricing.js'
 import { inr, cleanError, leadLabel } from '../lib/format.js'
+import EnquiryForm from '../components/EnquiryForm.jsx'
 import { Icon, ProductImage, thumbUrl, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 
@@ -67,6 +68,7 @@ export default function Product() {
     custom_request: !!p.custom_default || /custom/i.test(p.name), message: '', name_on_cake: '', age: '', colours: '', theme: '', instructions: '', custom_description: '',
   } : {})
   const [img, setImg] = useState(0)
+  const [enquire, setEnquire] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [showBreak, setShowBreak] = useState(false)
   const set = (k) => (v) => setSel((s) => ({ ...s, [k]: v }))
@@ -269,14 +271,16 @@ export default function Product() {
               <div className="total">{p.enquiry_only ? (p.base_price ? `from ${inr(p.base_price)}` : 'Price on request') : priced.line ? inr(priced.line.line_total) : '—'}</div>
             </button>
             {p.enquiry_only ? (
-              <a className="btn btn-wa" href={settings.whatsapp ? waLink(settings.whatsapp, enquiryMsg) : '#/contact'} target="_blank" rel="noreferrer"><WaIcon size={18} /> Message to order</a>
+              <button className="btn btn-primary" disabled={!p.is_available} onClick={() => setEnquire(true)}>Request a quote</button>
             ) : (
               <button className="btn btn-primary" disabled={!p.is_available || !!priced.err || uploading} onClick={() => add(false)}>
                 {editing ? 'Update cart' : 'Add to cart'}
               </button>
             )}
           </div>
-          {priced.err && <p className="err-text" style={{ marginTop: 8 }}>{priced.err}</p>}
+          {priced.err && !p.enquiry_only && <p className="err-text" style={{ marginTop: 8 }}>{priced.err}</p>}
+          {p.enquiry_only && settings.whatsapp && <p className="tiny muted" style={{ marginTop: 8 }}>Prefer to chat? <a href={waLink(settings.whatsapp, enquiryMsg)} target="_blank" rel="noreferrer">Message us on WhatsApp</a></p>}
+          {enquire && <EnquiryForm product={p} kind={cat?.slug === 'hampers' ? 'hamper' : cat?.slug === 'seasonal' ? 'seasonal' : 'other'} onClose={() => setEnquire(false)} />}
         </div>
       </div>
     </div>

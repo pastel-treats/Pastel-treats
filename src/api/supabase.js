@@ -39,10 +39,11 @@ export function createLiveApi(url, key) {
     },
     getOrder: (number, phone) => rpcJson('get_order', { p_number: number, p_phone: phone }),
     getOrderByLink: (token) => rpcJson('get_order_by_link', { p_token: token }),
+    submitEnquiry: (p) => rpcJson('submit_enquiry', { p }),
     submitReview: (token, rating, body) => rpcJson('submit_review', { p_token: token, p_rating: rating, p_body: body }),
     publicReviews: () => rpcJson('get_public_reviews', {}),
-    submitProof: (number, phone, reference, path, amount) =>
-      rpcJson('submit_payment_proof', { p_number: number, p_phone: phone, p_reference: reference, p_proof_path: path, p_amount: amount }),
+    submitProof: (number, phone, reference, path, amount, note) =>
+      rpcJson('submit_payment_proof', { p_number: number, p_phone: phone, p_reference: reference, p_proof_path: path, p_amount: amount, ...(note ? { p_note: String(note).slice(0, 300) } : {}) }),
 
     // ---- customer accounts (OTP) ----
     async sendOtp({ email, phone }) {
@@ -82,6 +83,9 @@ export function createLiveApi(url, key) {
     // Deleting customer data: a one-time code is e-mailed to the bakery account first
     async sendDeleteCode(email) { must(await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } })) },
     async verifyDeleteCode(email, token) { must(await sb.auth.verifyOtp({ email, token: String(token).trim(), type: 'email' })) },
+    async getAlerts() { return must(await sb.from('admin_alerts').select('*').eq('id', 1).maybeSingle()) || { id: 1, enabled: false, ntfy_topic: null } },
+    async saveAlerts(patch) { return must(await sb.from('admin_alerts').upsert({ id: 1, ...patch, updated_at: new Date().toISOString() }).select().single()) },
+    testAlert: () => rpcJson('admin_test_alert', {}),
     deleteCustomer: (id) => rpcJson('admin_delete_customer', { p_id: id }),
     async recoveryReady() { const { data } = await sb.auth.getSession(); return !!data.session },
     async updatePassword(password) { must(await sb.auth.updateUser({ password })) },

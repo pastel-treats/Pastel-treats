@@ -6,6 +6,7 @@ import { quote as quoteCalc, calcAdvance } from '../lib/pricing.js'
 import { availability as availCalc, ACTIVE } from '../lib/schedule.js'
 import { normalizePhone } from '../lib/contact.js'
 import { todayISO, addDaysISO } from '../lib/dates.js'
+import { ordersClosed, closedMessage } from '../lib/announcements.js'
 
 const KEY = 'pt-demo-db-v11'
 const SESSION = 'pt-demo-session'
@@ -218,7 +219,7 @@ export function createDemoApi() {
       if (!['pickup', 'delivery', 'courier'].includes(p.fulfilment)) err('INVALID: choose pickup or courier')
       if (!p.accepted_policies) err('INVALID: please accept the ordering policy')
       const s = db.settings
-      if (s.orders_paused && (!s.orders_paused_until || todayISO() < s.orders_paused_until)) err('PAUSED: ' + (s.orders_paused_message || 'We are not taking new orders right now.'))
+      if (ordersClosed(s)) err('PAUSED: ' + closedMessage(s))
       if (p.fulfilment === 'delivery' && !s.home_delivery_enabled) err('INVALID: home delivery is not available — please choose self pickup')
       const method = p.payment_method || 'upi'
       if (method === 'cash' && (s.cash_for || 'both') === 'balance') err('INVALID: the advance must be paid online/UPI; cash is accepted for the balance only')
@@ -302,6 +303,26 @@ export function createDemoApi() {
       if (!o) err('NOT_FOUND: this order link is not valid')
       return clone({ ...view(db, o), phone: o.phone })
     },
+    async submitEnquiry(p) {
+      await sleep(300)
+      const db = load()
+      db.enquiries = db.enquiries || []; db.enquiry_counters = db.enquiry_counters || {}
+      const phone = normalizePhone(p.phone)
+      if (!String(p.name || '').trim()) err('INVALID: please enter your name')
+      if (!phone) err('INVALID: please enter a valid mobile number')
+      if (db.enquiries.filter((e) => e.phone === phone && Date.now() - Date.parse(e.created_at) < 36e5).length >= 3) err('RATE_LIMIT: you have sent a few requests already — we will message you soon on WhatsApp')
+      const prod = db.products.find((x) => x.id === p.product_id)
+      const slug = db.categories.find((c) => c.id === prod?.category_id)?.slug
+      const [kind, prefix] = slug === 'hampers' ? ['hamper', 'HP'] : slug === 'seasonal' ? ['seasonal', 'SE'] : ['other', 'EQ']
+      const yy = todayISO().slice(2, 4)
+      const n = (db.enquiry_counters[prefix + yy] || 0) + 1; db.enquiry_counters[prefix + yy] = n
+      const num = `${prefix}-${n}-${yy}`
+      db.enquiries.push({ id: uid(), enquiry_number: num, kind, product_id: prod?.id || null, product_name: prod?.name || p.product_name, customer_name: String(p.name).trim().toUpperCase(), phone,
+        quantity: p.quantity || null, budget: p.budget || null, needed_by: p.needed_by || null, fulfilment: p.fulfilment || null, city: p.city || null, notes: p.notes || null,
+        status: 'new', quote_amount: null, amount_paid: 0, admin_notes: null, created_at: nowISO(), updated_at: nowISO() })
+      save()
+      return { enquiry_number: num, kind }
+    },
     async submitReview(token, rating, body) {
       await sleep(200)
       const db = load()
@@ -332,7 +353,7 @@ export function createDemoApi() {
       rateLimit('phone:' + v, 10, 6e5)
       return clone(db.orders.filter((o) => o.phone === v).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((o) => { const x = view(db, o); delete x.address; delete x.payments; return x }))
     },
-    async submitProof(number, phone, reference, path, amount) {
+    async submitProof(number, phone, reference, path, amount, note) {
       const db = load()
       rateLimit('proof:' + normalizePhone(phone), 6, 6e5)
       const o = db.orders.find((x) => x.order_number === String(number).trim().toUpperCase() && x.phone === normalizePhone(phone))
@@ -341,7 +362,7 @@ export function createDemoApi() {
       if (!String(reference || '').trim() && !path) err('INVALID: please upload the payment screenshot')
       if (String(reference || '').trim() && db.payments.some((p) => p.order_id === o.id && p.reference === String(reference).trim() && p.status !== 'rejected')) return clone(view(db, o))
       db.payments.push({ id: uid(), order_id: o.id, kind: o.amount_paid >= o.advance_due ? 'balance' : 'advance', method: 'upi',
-        amount: Math.max(amount ?? o.advance_due - o.amount_paid, 0), reference: reference?.trim() || null, status: 'pending', proof_path: path || null, note: 'Reported by customer', created_at: nowISO() })
+        amount: Math.max(amount ?? o.advance_due - o.amount_paid, 0), reference: reference?.trim() || null, status: 'pending', proof_path: path || null, note: note ? 'Reported by customer · ' + String(note).slice(0, 300) : 'Reported by customer', created_at: nowISO() })
       recalc(db, o.id)
       save()
       return clone(view(db, o))
@@ -396,6 +417,9 @@ export function createDemoApi() {
     async recoveryReady() { return false },
     async sendDeleteCode() { /* demo: the code is always 123456 */ },
     async verifyDeleteCode(email, token) { if (String(token).trim() !== '123456') err('INVALID: wrong code (demo code is 123456)'); setSess({ ...(getSess() || {}), codeAt: Date.now() }) },
+    async getAlerts() { const db = load(); return clone(db.admin_alerts || { id: 1, enabled: false, ntfy_topic: null }) },
+    async saveAlerts(patch) { const db = load(); db.admin_alerts = { id: 1, ...(db.admin_alerts || {}), ...patch }; save(); return clone(db.admin_alerts) },
+    async testAlert() { await sleep(300); return true },
     async deleteCustomer(id) {
       const s = getSess() || {}
       if (!s.codeAt || Date.now() - s.codeAt > 600000) err('CONFIRM: please confirm with the code sent to the bakery e-mail')

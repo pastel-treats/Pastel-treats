@@ -87,7 +87,10 @@ log('welcome back after GPay (even after reload):', await page.locator('.welcome
 await shot('07c-back-from-gpay', true)
 // picking the screenshot places the order straight away
 await page.locator('#pay-proof input[type=file]').setInputFiles('public/og.png')
-await page.waitForURL(/#\/order\//, { timeout: 8000 })
+await page.waitForSelector('#pay-proof .notice', { timeout: 60000 })
+log('random picture refused:', (await page.locator('#pay-proof .notice').innerText()).includes('doesn’t look like a UPI'))
+await page.locator('#pay-proof input[type=file]').setInputFiles('scripts/fixtures/upi-paid-850.png')
+await page.waitForURL(/#\/order\//, { timeout: 60000 })
 await wait(600)
 const orderNo = (await page.locator('h1').first().innerText()).trim()
 log('order placed:', orderNo, '| short ID format PT-n-YY:', /^PT-\d+-\d{2}$/.test(orderNo))

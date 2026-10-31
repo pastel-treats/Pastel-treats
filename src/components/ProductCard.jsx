@@ -30,7 +30,7 @@ export default function ProductCard({ p }) {
             : p.unit_label === 'each' ? <>{inr(p.base_price)} <small>each · min {p.min_qty || 1}</small></>
             : <>{(hasChoices(p) || p.pricing_mode === 'per_kg') && <small>from </small>}{inr(startingPrice(p))}{p.pricing_mode === 'per_kg' && <small> /kg</small>}</>}
         </div>
-        <div className="cta">{!p.is_available ? 'Currently unavailable' : p.enquiry_only ? 'Message to order →' : 'Customise & order →'}</div>
+        <div className="cta">{!p.is_available ? 'Currently unavailable' : p.enquiry_only ? 'Request a quote →' : 'Customise & order →'}</div>
       </div>
     </Link>
   )

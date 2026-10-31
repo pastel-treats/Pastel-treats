@@ -13,6 +13,7 @@ import PlaceSelect from '../components/PlaceSelect.jsx'
 import { DEFAULT_STATE } from '../data/places.js'
 import { Empty, Field, Icon, ProductImage, Modal, compressImage, ACCEPT_IMG } from '../components/ui.jsx'
 import UpiPayBox from '../components/UpiPayBox.jsx'
+import { checkUpiScreenshot, warmUpUpiCheck } from '../lib/upiCheck.js'
 import { PolicyText, LocationCard } from './Info.jsx'
 
 const DRAFT = 'pt-checkout-draft'
@@ -37,6 +38,10 @@ export default function Checkout() {
   const [payStep, setPayStep] = useState(false) // UPI: pay first, then the order is placed
   const [proof, setProof] = useState(null)
   const [proofPrev, setProofPrev] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [proofErr, setProofErr] = useState(null)
+  const [proofFails, setProofFails] = useState(0)
+  const [proofNote, setProofNote] = useState('')
   const idem = useRef(sessionStorage.getItem('pt-idem') || crypto.randomUUID())
   useEffect(() => { try { sessionStorage.setItem('pt-idem', idem.current) } catch { /* */ } }, [])
   // short payment reference shown in the customer's UPI app note, so the baker can match the payment
@@ -58,6 +63,7 @@ export default function Checkout() {
     const p = { idem: idem.current, app, amount: q.advance_due, at: Date.now() }
     try { sessionStorage.setItem(PAYKEY, JSON.stringify(p)) } catch { /* */ }
     setPaying(p)
+    warmUpUpiCheck() // get the screenshot checker ready while they pay
   }
   useEffect(() => { try { sessionStorage.setItem(DRAFT, JSON.stringify({ ...f, accepted_policies: false })) } catch { /* */ } }, [f])
 
@@ -96,6 +102,8 @@ export default function Checkout() {
   ]
   // UPI orders with a known price: show the QR and take the payment BEFORE the order is created.
   // (Custom designs and courier wait for the baker's price, so they still pay after.)
+  const fullPay = !q.err && q.advance_due > 0 && q.advance_due >= q.total // small orders are paid in full
+  const payWord = fullPay ? 'full amount' : 'advance'
   const payFirst = f.payment_method === 'upi' && !isCustom && f.fulfilment !== 'courier' && !outOfZone && !q.err && q.advance_due > 0 && !!(s.upi_id || s.upi_qr_url)
   if (!methods.find((m) => m.id === f.payment_method) && f.payment_method !== 'upi') setTimeout(() => set('payment_method')('upi'))
 
@@ -124,7 +132,24 @@ export default function Checkout() {
     return !Object.keys(e).length
   }
 
-  async function submit(proofFile = proof) {
+  // check the picture really is a UPI payment for this amount, then place the order
+  async function useScreenshot(file, force = false) {
+    setProofErr(null)
+    if (!file.type.startsWith('image/')) return setProofErr('Please choose the screenshot image of your payment.')
+    setProof(file); setProofPrev(URL.createObjectURL(file))
+    let note = proofNote
+    if (!force) {
+      setChecking(true)
+      const r = await checkUpiScreenshot(file, q.advance_due, { payee: [s.upi_id, s.upi_name, s.baker_name] })
+      setChecking(false)
+      if (!r.ok) { setProofErr(r.reason); setProofFails((n) => n + 1); setProofNote(r.note); return }
+      note = r.note
+    } else note = 'Customer confirmed it is their payment — auto-check did not match (' + (proofNote || 'no details') + ')'
+    setProofNote(note)
+    submit(file, note)
+  }
+
+  async function submit(proofFile = proof, note = proofNote) {
     if (busy || !validate()) return
     if (payFirst && !payStep) {
       setPayStep(true)
@@ -161,7 +186,7 @@ export default function Checkout() {
       let proofSaved = !payFirst
       if (payFirst) {
         for (let i = 0; i < 3 && !proofSaved; i++) {
-          try { await api.submitProof(r.order_number, f.phone, payRef, proofPath, q.advance_due); proofSaved = true }
+          try { await api.submitProof(r.order_number, f.phone, payRef, proofPath, q.advance_due, note); proofSaved = true }
           catch (pe) { if (i === 2) toast('Order placed! Please send your payment screenshot again on the next screen: ' + cleanError(pe), true); else await new Promise((res) => setTimeout(res, 1200)) }
         }
         try { sessionStorage.removeItem(PAYKEY) } catch { /* */ }
@@ -220,24 +245,7 @@ export default function Checkout() {
                 <LocationCard compact />
                 {s.pickup_instructions && <p className="small muted" style={{ margin: 0 }}>{s.pickup_instructions}</p>}
               </div>
-            ) : (
-              <div className="stack" style={{ marginTop: 14 }}>
-                <div data-err="line"><Field label="House / flat, street" error={errors.line}><input className={'input' + (errors.line ? ' err' : '')} autoComplete="street-address" value={f.address.line} onChange={(e) => setAddr('line')(e.target.value)} /></Field></div>
-                <div className="grid-2">
-                  <Field label="Area / locality"><input className="input" value={f.address.area} onChange={(e) => setAddr('area')(e.target.value)} /></Field>
-                  <Field label="City / town"><input className="input" autoComplete="address-level2" placeholder="Type your city / town" value={f.address.city} onChange={(e) => setAddr('city')(e.target.value)} /></Field>
-                  <div data-err="pincode"><Field label="PIN code" error={errors.pincode}><input className={'input' + (errors.pincode ? ' err' : '')} inputMode="numeric" maxLength={6} autoComplete="postal-code" value={f.address.pincode} onChange={(e) => setAddr('pincode')(e.target.value.replace(/\D/g, ''))} /></Field></div>
-                  <Field label="Landmark"><input className="input" value={f.address.landmark} onChange={(e) => setAddr('landmark')(e.target.value)} /></Field>
-                </div>
-                <Field label={f.fulfilment === 'courier' ? 'Notes for the courier' : 'Delivery instructions'} hint="optional"><input className="input" value={f.address.instructions} onChange={(e) => setAddr('instructions')(e.target.value)} placeholder="Gate code, call on arrival…" /></Field>
-                {zone && <div className="notice info small"><Icon name="check" size={18} /> We deliver to {zone.name}: {q.delivery_charge ? inr(q.delivery_charge) : 'free delivery'}{zone.free_above && q.delivery_charge ? ` (free above ${inr(zone.free_above)})` : ''}.</div>}
-                {outOfZone && (
-                  <div className="notice warn small"><Icon name="map" size={18} /><div>Sorry, {f.address.pincode} is outside our delivery area.
-                    {s.allow_out_of_zone_requests && <label className="check" style={{ marginTop: 6 }}><input type="checkbox" checked={f.request_out_of_zone} onChange={(e) => set('request_out_of_zone')(e.target.checked)} /> Send my order anyway — the baker will confirm if delivery is possible and the charge.</label>}
-                  </div></div>
-                )}
-              </div>
-            )}
+            ) : null}
           </section>
 
           {/* 2. when */}
@@ -271,13 +279,13 @@ export default function Checkout() {
 
           {/* 3. who */}
           <section className="card">
-            <div className="row between"><div className="card-title">3 · Your details</div></div>
+            <div className="row between"><div className="card-title">{shipping ? '3 · Your details & address' : '3 · Your details'}</div></div>
             <div className="grid-2">
               <div data-err="name"><Field label="Full name" error={errors.name}><input className={'input' + (errors.name ? ' err' : '')} autoComplete="name" autoCapitalize="characters" style={{ textTransform: 'uppercase' }} value={f.name} onChange={(e) => set('name')(e.target.value.toUpperCase())} /></Field></div>
               <div data-err="phone"><Field label="Mobile number" error={errors.phone}><PhoneInput invalid={!!errors.phone} value={f.phone} onChange={set('phone')} /></Field></div>
             </div>
             <div data-err="city" style={{ marginTop: 12 }}>
-              <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>Where are you ordering from?</div>
+              <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>{shipping ? 'Delivery state & district' : 'Where are you ordering from?'}</div>
               <PlaceSelect state={f.state} city={f.city} error={errors.city} onChange={({ state, city }) => setF((x) => ({ ...x, state, city }))} />
             </div>
             <label className="check" style={{ margin: '12px 0' }}><input type="checkbox" checked={f.sameWa} onChange={(e) => set('sameWa')(e.target.checked)} /> Use the same number for WhatsApp updates</label>
@@ -285,6 +293,28 @@ export default function Checkout() {
               {!f.sameWa && <div data-err="whatsapp"><Field label="WhatsApp number" error={errors.whatsapp}><PhoneInput invalid={!!errors.whatsapp} value={f.whatsapp} onChange={set('whatsapp')} /></Field></div>}
               <div data-err="email"><Field label="E-mail" hint="optional" error={errors.email}><input className="input" type="email" autoComplete="email" value={f.email} onChange={(e) => set('email')(e.target.value)} /></Field></div>
             </div>
+            {shipping && (
+              <>
+                <hr className="soft" />
+                <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{f.fulfilment === 'courier' ? '📦 Courier address' : '🚗 Delivery address'}</div>
+<div className="stack" style={{ marginTop: 6 }}>
+                <div data-err="line"><Field label="House / flat, street" error={errors.line}><input className={'input' + (errors.line ? ' err' : '')} autoComplete="street-address" value={f.address.line} onChange={(e) => setAddr('line')(e.target.value)} /></Field></div>
+                <div className="grid-2">
+                  <Field label="Area / locality"><input className="input" value={f.address.area} onChange={(e) => setAddr('area')(e.target.value)} /></Field>
+                  <Field label="City / town"><input className="input" autoComplete="address-level2" placeholder="Type your city / town" value={f.address.city} onChange={(e) => setAddr('city')(e.target.value)} /></Field>
+                  <div data-err="pincode"><Field label="PIN code" error={errors.pincode}><input className={'input' + (errors.pincode ? ' err' : '')} inputMode="numeric" maxLength={6} autoComplete="postal-code" value={f.address.pincode} onChange={(e) => setAddr('pincode')(e.target.value.replace(/\D/g, ''))} /></Field></div>
+                  <Field label="Landmark"><input className="input" value={f.address.landmark} onChange={(e) => setAddr('landmark')(e.target.value)} /></Field>
+                </div>
+                <Field label={f.fulfilment === 'courier' ? 'Notes for the courier' : 'Delivery instructions'} hint="optional"><input className="input" value={f.address.instructions} onChange={(e) => setAddr('instructions')(e.target.value)} placeholder="Gate code, call on arrival…" /></Field>
+                {zone && <div className="notice info small"><Icon name="check" size={18} /> We deliver to {zone.name}: {q.delivery_charge ? inr(q.delivery_charge) : 'free delivery'}{zone.free_above && q.delivery_charge ? ` (free above ${inr(zone.free_above)})` : ''}.</div>}
+                {outOfZone && (
+                  <div className="notice warn small"><Icon name="map" size={18} /><div>Sorry, {f.address.pincode} is outside our delivery area.
+                    {s.allow_out_of_zone_requests && <label className="check" style={{ marginTop: 6 }}><input type="checkbox" checked={f.request_out_of_zone} onChange={(e) => set('request_out_of_zone')(e.target.checked)} /> Send my order anyway — the baker will confirm if delivery is possible and the charge.</label>}
+                  </div></div>
+                )}
+              </div>
+              </>
+            )}
             <hr className="soft" />
             <div className="grid-2">
               <Field label="What’s the occasion?" hint="optional">
@@ -314,7 +344,7 @@ export default function Checkout() {
             </div>
             <p className="small muted" style={{ marginTop: 10 }}>
               {f.payment_method === 'cash' ? 'The baker will confirm your order before preparing it. Cash is recorded when you pay.'
-                : payFirst ? `Next, you’ll pay the ${inr(q.advance_due)} advance by UPI. Your order is placed right after you pay.`
+                : payFirst ? `Next, you’ll pay the ${inr(q.advance_due)} ${payWord} by UPI. Your order is placed right after you pay.${fullPay ? ' (Orders below ₹1,000 are paid in full.)' : ''}`
                 : `Pay the advance${q?.advance_due ? ' of ' + inr(q.advance_due) : ''} after placing the order.`}
               {cashBalanceOk && f.payment_method !== 'cash' && ` The balance can be paid in cash or UPI ${f.fulfilment === 'pickup' ? 'at pickup' : 'before dispatch'}.`}
             </p>
@@ -329,7 +359,7 @@ export default function Checkout() {
           {payFirst && payStep && (
             <section className="card pay-now" id="pay-now">
               <div className="row between" style={{ alignItems: 'baseline' }}>
-                <div className="card-title">5 · Pay the advance: {inr(q.advance_due)}</div>
+                <div className="card-title">5 · {fullPay ? 'Pay for your order' : 'Pay the advance'}: {inr(q.advance_due)}</div>
                 <button type="button" className="link-btn small" onClick={() => setPayStep(false)} disabled={busy}>Edit order</button>
               </div>
               <ol className="pay-steps">
@@ -350,18 +380,26 @@ export default function Checkout() {
               <hr className="soft" />
               <div id="pay-proof" className="stack">
                 <label className={'proof-drop' + (back ? ' hot' : '')}>
-                  <input type="file" accept={ACCEPT_IMG} hidden disabled={busy || ordersClosed(s)} onChange={(e) => {
+                  <input type="file" accept={ACCEPT_IMG} hidden disabled={busy || checking || ordersClosed(s)} onChange={(e) => {
                     const file = e.target.files[0]; e.target.value = ''
-                    if (!file) return
-                    if (!file.type.startsWith('image/')) return toast('Please choose the screenshot image', true)
-                    setProof(file); setProofPrev(URL.createObjectURL(file))
-                    submit(file) // place the order straight away
+                    if (file) useScreenshot(file)
                   }} />
                   {proofPrev ? <img src={proofPrev} alt="Your payment screenshot" className="proof-prev" /> : <span className="big" aria-hidden="true">📸</span>}
-                  <b>{busy ? 'Placing your order…' : proofPrev ? 'Screenshot added — tap to change' : 'Upload payment screenshot'}</b>
-                  <span className="tiny muted">{busy ? 'Please wait a moment and don’t close this page.' : 'Your order is placed as soon as you choose it'}</span>
+                  <b>{checking ? 'Checking your screenshot…' : busy ? 'Placing your order…' : proofPrev ? 'Tap to choose a different screenshot' : 'Upload payment screenshot'}</b>
+                  <span className="tiny muted">{checking ? 'Making sure it’s your UPI payment of ' + inr(q.advance_due) + ' — a few seconds' : busy ? 'Please wait a moment and don’t close this page.' : 'Only the UPI “Payment successful” screenshot is accepted'}</span>
                 </label>
-                {proof && !busy && <button className="btn btn-primary btn-block" disabled={ordersClosed(s)} onClick={() => submit()}>Place my order</button>}
+                {proofErr && (
+                  <div className="notice warn small" role="alert">
+                    {proofErr}
+                    {proofFails >= 2 && proof && (
+                      <div style={{ marginTop: 8 }}>
+                        <button type="button" className="btn btn-white btn-sm" onClick={() => useScreenshot(proof, true)}>This is my real payment screenshot — send it to the baker</button>
+                        <div className="tiny muted" style={{ marginTop: 4 }}>The baker will check it against her UPI app before confirming.</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {proof && !busy && !checking && !proofErr && <button className="btn btn-primary btn-block" disabled={ordersClosed(s)} onClick={() => submit()}>Place my order</button>}
                 <p className="tiny muted" style={{ margin: 0 }}>Payment note: <b>{payRef}</b> · The baker matches your screenshot with her UPI app and confirms your order. Please don’t pay twice.</p>
               </div>
             </section>
@@ -392,14 +430,14 @@ export default function Checkout() {
                 <div className="ln"><span>{f.fulfilment === 'courier' ? 'Courier' : 'Collection'}</span><span>{f.fulfilment === 'pickup' ? 'Self pickup — free' : f.fulfilment === 'courier' ? 'Charge confirmed by us' : zone ? (q.delivery_charge ? inr(q.delivery_charge) : 'Free') : outOfZone ? 'To be confirmed' : 'Enter PIN code'}</span></div>
                 <div className="ln total"><span>Total</span><span>{inr(q.total)}</span></div>
                 {f.payment_method !== 'cash' && <>
-                  <div className="ln" style={{ color: 'var(--forest)', fontWeight: 600 }}><span>Advance to pay now</span><span>{inr(q.advance_due)}</span></div>
+                  <div className="ln" style={{ color: 'var(--forest)', fontWeight: 600 }}><span>{fullPay ? 'Pay now (full amount)' : 'Advance to pay now'}</span><span>{inr(q.advance_due)}</span></div>
                   <div className="ln muted"><span>Balance {f.fulfilment === 'pickup' ? 'at pickup' : 'later'}</span><span>{inr(q.balance)}</span></div>
                 </>}
                 {f.date && <div className="ln muted" style={{ marginTop: 6 }}><span>{modeLabel}</span><span>{fmtDate(f.date, { weekday: true })}{f.slotLabel ? `, ${f.slotLabel}` : ''}</span></div>}
                 {isCustom && <div className="tiny" style={{ color: 'var(--rose-deep)' }}>Custom-design price is an estimate until the baker approves it.</div>}
               </div>
             )}
-            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={busy || !!q.err || ordersClosed(s)} onClick={() => submit()}>
+            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={busy || checking || !!q.err || ordersClosed(s)} onClick={() => (payStep && (!proof || proofErr) ? document.getElementById('pay-proof')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : submit())}>
               {busy ? 'Placing your order…' : payFirst ? (payStep ? (proof ? 'Place my order' : 'Upload screenshot to place order') : 'Continue to payment') : isCustom || f.payment_method === 'cash' ? 'Send order request' : 'Place order & pay advance'}
             </button>
             {ordersClosed(s) && <p className="err-text center">{closedMessage(s)}</p>}

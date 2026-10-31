@@ -4,7 +4,74 @@
 -- • When orders are closed with a reopen date, orders open again by themselves on that date.
 -- • Optional different advance for bigger orders (e.g. above ₹1,000), set in Business settings → Payments.
 -- • Payment screenshots: the same payment sent twice is recorded once.
+-- • Phone alerts for every new order (ntfy app), even when the dashboard is closed.
+-- • Small orders paid in full: below ₹1,000 = 100%, ₹1,000 and above = 50% advance (change any time in Settings → Payments).
+-- • Orders open from a chosen date & time (set to Sun 1 Nov, 11:11 AM).
 -- Paste ALL of this → Supabase → SQL Editor → Run. Safe to run more than once.
+
+-- Phone alerts
+do $x$ begin create extension if not exists pg_net; exception when others then raise notice 'pg_net is not available — phone alerts stay off'; end $x$;
+-- Phone alerts for the baker (works even when the app is closed): every new order sends a loud
+-- notification through the free "ntfy" app. Only the baker can read or change these settings.
+create table if not exists public.admin_alerts (
+  id int primary key default 1 check (id = 1),
+  enabled boolean not null default false,
+  ntfy_topic text,
+  site_url text default 'https://pasteltreats.in',
+  updated_at timestamptz not null default now()
+);
+
+alter table public.admin_alerts enable row level security;
+drop policy if exists admin_all on public.admin_alerts;
+create policy admin_all on public.admin_alerts for all to authenticated using (public.is_admin()) with check (public.is_admin());
+insert into public.admin_alerts(id) values (1) on conflict (id) do nothing;
+
+-- Send the phone alert (needs the pg_net extension, which Supabase provides). Never blocks an order.
+create or replace function public.send_phone_alert(p_title text, p_message text, p_click text default null) returns boolean
+language plpgsql volatile security definer set search_path = public as $$
+declare a admin_alerts;
+begin
+  select * into a from admin_alerts where id = 1;
+  if not found or not a.enabled or coalesce(trim(a.ntfy_topic), '') = '' then return false; end if;
+  begin
+    perform net.http_post(
+      url := 'https://ntfy.sh/',
+      body := jsonb_build_object('topic', a.ntfy_topic, 'title', p_title, 'message', p_message, 'priority', 5,
+                                 'tags', jsonb_build_array('cake', 'bell'),
+                                 'click', coalesce(p_click, coalesce(a.site_url, 'https://pasteltreats.in') || '/#/admin/orders')),
+      headers := '{"Content-Type": "application/json"}'::jsonb);
+    return true;
+  exception when others then
+    return false; -- alerts are a convenience: an order must never fail because of them
+  end;
+end $$;
+revoke all on function public.send_phone_alert(text, text, text) from public, anon, authenticated;
+
+create or replace function public.alert_new_order() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform send_phone_alert(
+    '🎂 New order ' || new.order_number || ' · ₹' || to_char(new.total, 'FM99,99,999'),
+    split_part(initcap(new.customer_name), ' ', 1) || ' · ' ||
+      case new.fulfilment when 'courier' then 'Courier' when 'delivery' then 'Delivery' else 'Pickup' end || ' ' ||
+      to_char(new.requested_date, 'Dy DD Mon') || coalesce(', ' || new.slot_label, '') || E'\n' ||
+      coalesce((select string_agg((i ->> 'qty') || ' × ' || (i ->> 'name'), ', ') from jsonb_array_elements(new.items) i), '') ||
+      case when new.is_custom then E'\nCustom design — needs your quote' else '' end,
+    null);
+  return new;
+end $$;
+drop trigger if exists orders_phone_alert on public.orders;
+create trigger orders_phone_alert after insert on public.orders for each row execute function public.alert_new_order();
+
+-- "Send test alert" button in the dashboard
+create or replace function public.admin_test_alert() returns boolean
+language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'AUTH: not allowed'; end if;
+  return send_phone_alert('🔔 Test alert from Pastel Treats', 'If you can hear this, new-order alerts are working — even when the app is closed.', null);
+end $$;
+grant execute on function public.admin_test_alert() to authenticated;
+
 
 create or replace function public.calc_advance(total int) returns int
 language plpgsql stable security definer set search_path = public as $$
@@ -12,7 +79,7 @@ declare mode text; val numeric; d jsonb;
 begin
   select data into d from settings where id = 1;
   -- bigger orders (above the chosen amount) can have their own advance rule
-  if coalesce((d ->> 'advance_tier_enabled')::boolean, false) and total > coalesce((d ->> 'advance_tier_above')::numeric, 0) then
+  if coalesce((d ->> 'advance_tier_enabled')::boolean, false) and total >= coalesce((d ->> 'advance_tier_above')::numeric, 0) then
     mode := coalesce(d ->> 'advance_tier_mode', 'percent'); val := coalesce((d ->> 'advance_tier_value')::numeric, 50);
   else
     mode := coalesce(d ->> 'advance_mode', 'percent'); val := coalesce((d ->> 'advance_value')::numeric, 50);
@@ -21,7 +88,8 @@ begin
   return least(total, ceil(total * val / 100.0)::int);
 end $$;
 
-create or replace function public.submit_payment_proof(p_number text, p_phone text, p_reference text, p_proof_path text, p_amount int)
+drop function if exists public.submit_payment_proof(text, text, text, text, int);
+create or replace function public.submit_payment_proof(p_number text, p_phone text, p_reference text, p_proof_path text, p_amount int, p_note text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare o orders;
 begin
@@ -40,10 +108,11 @@ begin
   insert into payments(order_id, kind, method, amount, reference, status, proof_path, note)
   values (o.id, case when o.amount_paid >= o.advance_due then 'balance' else 'advance' end, 'upi',
           greatest(coalesce(p_amount, o.advance_due - o.amount_paid), 0), nullif(trim(p_reference), ''), 'pending', nullif(p_proof_path, ''),
-          'Reported by customer');
+          'Reported by customer' || coalesce(' · ' || left(nullif(trim(p_note), ''), 300), ''));
   select * into o from orders where id = o.id;
   return order_public_view(o);
 end $$;
+grant execute on function public.submit_payment_proof(text, text, text, text, int, text) to anon, authenticated;
 
 create or replace function public.place_order(p jsonb) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -82,6 +151,10 @@ begin
   if not coalesce((p ->> 'accepted_policies')::boolean, false) then raise exception 'INVALID: please accept the ordering policy'; end if;
 
   s := (select data from settings where id = 1);
+  -- orders can be scheduled to open at a date & time (bakery time), e.g. the launch
+  if nullif(s ->> 'orders_open_at', '') is not null and (now() at time zone tz) < (s ->> 'orders_open_at')::timestamp then
+    raise exception 'PAUSED: Online orders open on %. See you then!', trim(to_char((s ->> 'orders_open_at')::timestamp, 'Dy FMDD Mon "at" FMHH12:MI AM'));
+  end if;
   -- closed for orders (optionally until a reopen date, in bakery time)
   if coalesce((s ->> 'orders_paused')::boolean, false)
      and (nullif(s ->> 'orders_paused_until', '') is null or (now() at time zone tz)::date < (s ->> 'orders_paused_until')::date) then
@@ -216,3 +289,13 @@ begin
     'advance_due', o.advance_due, 'subtotal', o.subtotal, 'delivery_charge', o.delivery_charge,
     'is_custom', o.is_custom, 'needs_delivery_approval', o.needs_delivery_approval, 'duplicate', false, 'link_token', o.access_token);
 end $$;
+
+-- Launch settings (all can be changed later in the dashboard):
+--   below ₹1,000 = paid in full, ₹1,000 and above = 50% advance; online orders open Sun 1 Nov 2026 at 11:11 AM
+update public.settings set data = data || jsonb_build_object(
+  'advance_mode', 'percent', 'advance_value', 100,
+  'advance_tier_enabled', true, 'advance_tier_above', 1000, 'advance_tier_mode', 'percent', 'advance_tier_value', 50,
+  'orders_open_at', '2026-11-01T11:11') where id = 1;
+update public.settings set data = jsonb_set(data, '{policies,advance}',
+  to_jsonb('Orders below ₹1,000 are paid in full when you order. For orders of ₹1,000 and above, a 50% advance confirms your order and the balance is paid at pickup (or before courier dispatch).'::text))
+  where id = 1 and data ? 'policies';

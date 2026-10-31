@@ -323,6 +323,16 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   ok('009 update is safe to run (twice)', e1 === null && e2 === null && n === 4 && /NO flour/.test(prot), e1 || e2)
   const e3 = await err(() => db.exec(readFileSync('supabase/migrations/010_order_limit_close_orders.sql', 'utf8')))
   ok('010 update runs cleanly', e3 === null, e3)
+  const e4 = await err(() => db.exec(readFileSync('supabase/migrations/011_enquiries.sql', 'utf8')))
+  const e5 = await err(() => db.exec(readFileSync('supabase/migrations/011_enquiries.sql', 'utf8')))
+  ok('011 enquiries update runs cleanly (twice)', e4 === null && e5 === null, e4 || e5)
+  const st = (await db.query(`select data from settings where id = 1`)).rows[0].data
+  ok('launch settings: full payment below ₹1,000, 50% from ₹1,000, opens 1 Nov 11:11', st.advance_value === 100 && st.advance_tier_enabled && st.advance_tier_above === 1000 && st.advance_tier_value === 50 && st.orders_open_at === '2026-11-01T11:11', JSON.stringify({ a: st.advance_value, t: st.advance_tier_value, o: st.orders_open_at }))
+  const q4 = (await asAnon('select quote_order($1) r', [{ items: [{ product_id: chouxP.id, qty: 4 }], fulfilment: 'pickup' }])).rows[0].r
+  const q10 = (await asAnon('select quote_order($1) r', [{ items: [{ product_id: chouxP.id, qty: 10 }], fulfilment: 'pickup' }])).rows[0].r
+  const q12 = (await asAnon('select quote_order($1) r', [{ items: [{ product_id: chouxP.id, qty: 12 }], fulfilment: 'pickup' }])).rows[0].r
+  ok('₹400 order pays ₹400 (full); ₹1,000 order pays ₹500; ₹1,200 pays ₹600', q4.advance_due === 400 && q10.advance_due === 500 && q12.advance_due === 600, [q4.advance_due, q10.advance_due, q12.advance_due].join(', '))
+  await db.query(`update settings set data = data - 'orders_open_at' where id = 1`) // let the remaining tests place orders
 }
 
 
@@ -360,6 +370,57 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   const noShot = await err(() => asAnon('select submit_payment_proof($1, $2, $3, $4, $5)', [r.order_number, '93000 77788', '', '', r.advance_due]))
   const st = (await db.query(`select status from orders where order_number = $1`, [r.order_number])).rows[0].status
   ok('payment screenshot recorded once; status moves to "advance paid — being checked"', n === 1 && /screenshot/.test(noShot || '') && st === 'payment_verification', `${n} payment(s), ${st}`)
+}
+
+
+// phone alerts: a new order sends one loud ntfy alert; an alert problem never stops an order
+{
+  await db.exec(`create schema if not exists net; create table if not exists net.calls(url text, body jsonb);
+    create or replace function net.http_post(url text, body jsonb default '{}', params jsonb default '{}', headers jsonb default '{}', timeout_milliseconds int default 5000) returns bigint
+    language sql as $f$ insert into net.calls values (url, body); select 1::bigint $f$;
+    grant usage on schema net to anon, authenticated; grant all on net.calls to anon, authenticated;`)
+  await db.query(`insert into admin_alerts(id, enabled, ntfy_topic) values (1, true, 'pastel-test-topic') on conflict (id) do update set enabled = true, ntfy_topic = excluded.ntfy_topic`)
+  const r = (await asAnon('select place_order($1) r', [{ ...base, phone: '93000 88899', name: 'alert test', idempotency_key: 'al1', date: openDay(12), slot_id: slots[3].id }])).rows[0].r
+  const call = (await db.query(`select * from net.calls order by ctid desc limit 1`)).rows[0]
+  const anonRead = (await asAnon('select count(*)::int n from admin_alerts')).rows[0].n
+  const test = await err(() => asAnon('select admin_test_alert()'))
+  await db.exec(`drop function net.http_post(text, jsonb, jsonb, jsonb, int)`)
+  const r2 = await err(() => asAnon('select place_order($1) r', [{ ...base, phone: '93000 88800', name: 'alert test2', idempotency_key: 'al2', date: openDay(12), slot_id: slots[3].id }]))
+  ok('new order sends a phone alert; topic is private; broken alerts never block orders',
+    call?.url === 'https://ntfy.sh/' && call.body.topic === 'pastel-test-topic' && call.body.title.includes(r.order_number) && call.body.priority === 5 && anonRead === 0 && /AUTH/.test(test || '') && r2 === null,
+    call ? call.body.title + ' | ' + call.body.message.replace(/\n/g, ' / ') : 'no call')
+}
+
+
+// orders can be scheduled to open at a date & time (launch)
+{
+  const setS = (patch) => db.query(`update settings set data = data || $1::jsonb where id = 1`, [JSON.stringify(patch)])
+  const fut = new Date(Date.now() + 3 * 3600e3 + 5.5 * 3600e3).toISOString().slice(0, 16)
+  const past = new Date(Date.now() - 3600e3 + 5.5 * 3600e3).toISOString().slice(0, 16)
+  await setS({ orders_open_at: fut })
+  const before = await err(() => asAnon('select place_order($1) r', [{ ...base, phone: '93000 99911', idempotency_key: 'op1', date: openDay(13), slot_id: slots[1].id }]))
+  await setS({ orders_open_at: past })
+  const after = await err(() => asAnon('select place_order($1) r', [{ ...base, phone: '93000 99911', idempotency_key: 'op2', date: openDay(13), slot_id: slots[1].id }]))
+  await setS({ orders_open_at: null })
+  ok('orders refused before the opening time, accepted after', /PAUSED: Online orders open on/.test(before || '') && !/PAUSED/.test(after || ''), before)
+}
+
+
+// hamper / seasonal enquiries: own numbers (HP- / SE-), private to the baker, spam-limited
+{
+  const hp = (await db.query(`select id from products where name = 'Corporate Gift Hamper'`)).rows[0]
+  const se = (await db.query(`select id from products where name = 'Mango Sticky Rice'`)).rows[0]
+  const a = (await asAnon('select submit_enquiry($1) r', [{ product_id: hp.id, name: 'ravi k', phone: '94000 11122', quantity: '25 hampers', budget: 800, needed_by: openDay(10), notes: 'Diwali for staff' }])).rows[0].r
+  const b2 = (await asAnon('select submit_enquiry($1) r', [{ product_id: hp.id, name: 'ravi k', phone: '94000 11122', quantity: '5' }])).rows[0].r
+  const c = (await asAnon('select submit_enquiry($1) r', [{ product_id: se.id, name: 'meena', phone: '94000 11133' }])).rows[0].r
+  await asAnon('select submit_enquiry($1) r', [{ product_id: hp.id, name: 'ravi k', phone: '94000 11122' }])
+  const spam = await err(() => asAnon('select submit_enquiry($1) r', [{ product_id: hp.id, name: 'ravi k', phone: '94000 11122' }]))
+  const past = await err(() => asAnon('select submit_enquiry($1) r', [{ product_id: hp.id, name: 'x', phone: '94000 11144', needed_by: '2020-01-01' }]))
+  const anonRead = (await asAnon('select count(*)::int n from enquiries')).rows[0].n
+  const row = (await db.query(`select * from enquiries where enquiry_number = $1`, [a.enquiry_number])).rows[0]
+  ok('enquiries: HP-/SE- numbers, saved privately, spam & past dates refused',
+    /^HP-1-\d\d$/.test(a.enquiry_number) && /^HP-2-/.test(b2.enquiry_number) && /^SE-1-/.test(c.enquiry_number) && /RATE_LIMIT/.test(spam || '') && /date/.test(past || '') && anonRead === 0 && row.customer_name === 'RAVI K' && row.budget === 800 && row.kind === 'hamper',
+    [a.enquiry_number, b2.enquiry_number, c.enquiry_number].join(', '))
 }
 
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')

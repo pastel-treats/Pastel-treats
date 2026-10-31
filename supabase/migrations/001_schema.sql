@@ -344,6 +344,43 @@ create table if not exists public.reviews (
 );
 create index if not exists reviews_approved_idx on public.reviews (approved, created_at desc);
 
+-- Phone alerts for the baker (works even when the app is closed): every new order sends a loud
+-- notification through the free "ntfy" app. Only the baker can read or change these settings.
+create table if not exists public.admin_alerts (
+  id int primary key default 1 check (id = 1),
+  enabled boolean not null default false,
+  ntfy_topic text,
+  site_url text default 'https://pasteltreats.in',
+  updated_at timestamptz not null default now()
+);
+
+-- Hamper & seasonal enquiries ("Request a quote"): tracked separately from cake orders, with their own numbers
+-- HP-1-26 (gift hampers), SE-1-26 (seasonal), EQ-1-26 (anything else).
+create table if not exists public.enquiries (
+  id uuid primary key default gen_random_uuid(),
+  enquiry_number text unique not null,
+  kind text not null default 'hamper' check (kind in ('hamper','seasonal','other')),
+  product_id uuid references public.products(id) on delete set null,
+  product_name text,
+  customer_name text not null,
+  phone text not null,
+  quantity text,
+  budget int check (budget is null or budget >= 0),
+  needed_by date,
+  fulfilment text,
+  city text,
+  notes text,
+  status text not null default 'new' check (status in ('new','quoted','confirmed','completed','cancelled')),
+  quote_amount int check (quote_amount is null or quote_amount >= 0),
+  amount_paid int not null default 0 check (amount_paid >= 0),
+  admin_notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists enquiries_created_idx on public.enquiries (created_at desc);
+create table if not exists public.enquiry_counters (prefix text not null, yr int not null, last_no int not null default 0, primary key (prefix, yr));
+alter table public.enquiry_counters enable row level security; -- no policies: only submit_enquiry() touches it
+
 create table if not exists public.audit_logs (
   id bigserial primary key,
   actor uuid,
@@ -655,7 +692,7 @@ declare mode text; val numeric; d jsonb;
 begin
   select data into d from settings where id = 1;
   -- bigger orders (above the chosen amount) can have their own advance rule
-  if coalesce((d ->> 'advance_tier_enabled')::boolean, false) and total > coalesce((d ->> 'advance_tier_above')::numeric, 0) then
+  if coalesce((d ->> 'advance_tier_enabled')::boolean, false) and total >= coalesce((d ->> 'advance_tier_above')::numeric, 0) then
     mode := coalesce(d ->> 'advance_tier_mode', 'percent'); val := coalesce((d ->> 'advance_tier_value')::numeric, 50);
   else
     mode := coalesce(d ->> 'advance_mode', 'percent'); val := coalesce((d ->> 'advance_value')::numeric, 50);
@@ -726,6 +763,10 @@ begin
   if not coalesce((p ->> 'accepted_policies')::boolean, false) then raise exception 'INVALID: please accept the ordering policy'; end if;
 
   s := (select data from settings where id = 1);
+  -- orders can be scheduled to open at a date & time (bakery time), e.g. the launch
+  if nullif(s ->> 'orders_open_at', '') is not null and (now() at time zone tz) < (s ->> 'orders_open_at')::timestamp then
+    raise exception 'PAUSED: Online orders open on %. See you then!', trim(to_char((s ->> 'orders_open_at')::timestamp, 'Dy FMDD Mon "at" FMHH12:MI AM'));
+  end if;
   -- closed for orders (optionally until a reopen date, in bakery time)
   if coalesce((s ->> 'orders_paused')::boolean, false)
      and (nullif(s ->> 'orders_paused_until', '') is null or (now() at time zone tz)::date < (s ->> 'orders_paused_until')::date) then
@@ -957,11 +998,97 @@ $$;
 grant execute on function public.submit_review(text, int, text) to anon, authenticated;
 grant execute on function public.get_public_reviews() to anon, authenticated;
 
+-- Send the phone alert (needs the pg_net extension, which Supabase provides). Never blocks an order.
+create or replace function public.send_phone_alert(p_title text, p_message text, p_click text default null) returns boolean
+language plpgsql volatile security definer set search_path = public as $$
+declare a admin_alerts;
+begin
+  select * into a from admin_alerts where id = 1;
+  if not found or not a.enabled or coalesce(trim(a.ntfy_topic), '') = '' then return false; end if;
+  begin
+    perform net.http_post(
+      url := 'https://ntfy.sh/',
+      body := jsonb_build_object('topic', a.ntfy_topic, 'title', p_title, 'message', p_message, 'priority', 5,
+                                 'tags', jsonb_build_array('cake', 'bell'),
+                                 'click', coalesce(p_click, coalesce(a.site_url, 'https://pasteltreats.in') || '/#/admin/orders')),
+      headers := '{"Content-Type": "application/json"}'::jsonb);
+    return true;
+  exception when others then
+    return false; -- alerts are a convenience: an order must never fail because of them
+  end;
+end $$;
+revoke all on function public.send_phone_alert(text, text, text) from public, anon, authenticated;
+
+create or replace function public.alert_new_order() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform send_phone_alert(
+    '🎂 New order ' || new.order_number || ' · ₹' || to_char(new.total, 'FM99,99,999'),
+    split_part(initcap(new.customer_name), ' ', 1) || ' · ' ||
+      case new.fulfilment when 'courier' then 'Courier' when 'delivery' then 'Delivery' else 'Pickup' end || ' ' ||
+      to_char(new.requested_date, 'Dy DD Mon') || coalesce(', ' || new.slot_label, '') || E'\n' ||
+      coalesce((select string_agg((i ->> 'qty') || ' × ' || (i ->> 'name'), ', ') from jsonb_array_elements(new.items) i), '') ||
+      case when new.is_custom then E'\nCustom design — needs your quote' else '' end,
+    null);
+  return new;
+end $$;
+drop trigger if exists orders_phone_alert on public.orders;
+create trigger orders_phone_alert after insert on public.orders for each row execute function public.alert_new_order();
+
+-- "Send test alert" button in the dashboard
+create or replace function public.admin_test_alert() returns boolean
+language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'AUTH: not allowed'; end if;
+  return send_phone_alert('🔔 Test alert from Pastel Treats', 'If you can hear this, new-order alerts are working — even when the app is closed.', null);
+end $$;
+grant execute on function public.admin_test_alert() to authenticated;
+
+-- Customer sends a hamper / seasonal enquiry ("Request a quote")
+create or replace function public.submit_enquiry(p jsonb) returns jsonb
+language plpgsql volatile security definer set search_path = public as $$
+declare v_phone text := normalize_phone(p ->> 'phone'); prod products; cat text; v_kind text := 'other'; v_prefix text := 'EQ';
+        yy int := to_char(now() at time zone bakery_tz(), 'YY')::int; n int; num text; e enquiries; d date;
+begin
+  if coalesce(trim(p ->> 'name'), '') = '' then raise exception 'INVALID: please enter your name'; end if;
+  if v_phone is null then raise exception 'INVALID: please enter a valid mobile number'; end if;
+  if (select count(*) from enquiries where phone = v_phone and created_at > now() - interval '1 hour') >= 3 then
+    raise exception 'RATE_LIMIT: you have sent a few requests already — we will message you soon on WhatsApp';
+  end if;
+  if (select count(*) from enquiries where created_at > now() - interval '1 hour') >= 60 then
+    raise exception 'RATE_LIMIT: we are receiving a lot of requests right now — please message us on WhatsApp';
+  end if;
+  if nullif(p ->> 'product_id', '') is not null then
+    select * into prod from products where id = (p ->> 'product_id')::uuid;
+    select slug into cat from categories where id = prod.category_id;
+  end if;
+  if cat = 'hampers' then v_kind := 'hamper'; v_prefix := 'HP';
+  elsif cat = 'seasonal' then v_kind := 'seasonal'; v_prefix := 'SE'; end if;
+  d := nullif(p ->> 'needed_by', '')::date;
+  if d is not null and d < (now() at time zone bakery_tz())::date then raise exception 'INVALID: please choose a date from today onwards'; end if;
+  insert into enquiry_counters(prefix, yr, last_no) values (v_prefix, yy, 1)
+    on conflict (prefix, yr) do update set last_no = enquiry_counters.last_no + 1 returning last_no into n;
+  num := v_prefix || '-' || n || '-' || lpad(yy::text, 2, '0');
+  insert into enquiries(enquiry_number, kind, product_id, product_name, customer_name, phone, quantity, budget, needed_by, fulfilment, city, notes)
+  values (num, v_kind, prod.id, coalesce(prod.name, left(p ->> 'product_name', 120)), upper(left(trim(p ->> 'name'), 80)), v_phone,
+          left(nullif(trim(p ->> 'quantity'), ''), 80), nullif(p ->> 'budget', '')::int, d,
+          case when p ->> 'fulfilment' in ('pickup','courier','delivery') then p ->> 'fulfilment' end,
+          left(nullif(trim(p ->> 'city'), ''), 80), left(nullif(trim(p ->> 'notes'), ''), 1000))
+  returning * into e;
+  perform send_phone_alert('🎁 New ' || case v_kind when 'hamper' then 'hamper enquiry ' when 'seasonal' then 'seasonal enquiry ' else 'enquiry ' end || num,
+    split_part(initcap(e.customer_name), ' ', 1) || ' · ' || coalesce(e.product_name, '') || coalesce(' · ' || e.quantity, '') ||
+    coalesce(' · budget ₹' || e.budget, '') || coalesce(' · by ' || to_char(e.needed_by, 'DD Mon'), ''), null);
+  return jsonb_build_object('enquiry_number', num, 'kind', v_kind);
+end $$;
+grant execute on function public.submit_enquiry(jsonb) to anon, authenticated;
+
 -- (Privacy) There is deliberately NO way to list orders by mobile number alone.
 drop function if exists public.get_orders_by_phone(text);
 
 -- Customer reports a UPI payment (stays UNVERIFIED until the baker checks it)
-create or replace function public.submit_payment_proof(p_number text, p_phone text, p_reference text, p_proof_path text, p_amount int)
+-- (older 5-argument version replaced by the one below, which also keeps the screenshot check result)
+drop function if exists public.submit_payment_proof(text, text, text, text, int);
+create or replace function public.submit_payment_proof(p_number text, p_phone text, p_reference text, p_proof_path text, p_amount int, p_note text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare o orders;
 begin
@@ -980,7 +1107,7 @@ begin
   insert into payments(order_id, kind, method, amount, reference, status, proof_path, note)
   values (o.id, case when o.amount_paid >= o.advance_due then 'balance' else 'advance' end, 'upi',
           greatest(coalesce(p_amount, o.advance_due - o.amount_paid), 0), nullif(trim(p_reference), ''), 'pending', nullif(p_proof_path, ''),
-          'Reported by customer');
+          'Reported by customer' || coalesce(' · ' || left(nullif(trim(p_note), ''), 300), ''));
   select * into o from orders where id = o.id;
   return order_public_view(o);
 end $$;
@@ -1077,7 +1204,7 @@ grant execute on function public.admin_set_status(uuid, text, text) to authentic
 do $$ declare t text; begin
   foreach t in array array['settings','admins','categories','products','addons','time_slots','blackout_dates','delivery_zones',
                            'customers','customer_addresses','occasions','orders','order_status_history','payments',
-                           'notification_log','audit_logs','lookup_attempts','reviews'] loop
+                           'notification_log','audit_logs','lookup_attempts','reviews','admin_alerts','enquiries'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists admin_all on public.%I', t);
     execute format('create policy admin_all on public.%I for all to authenticated using (public.is_admin()) with check (public.is_admin())', t);
@@ -1130,7 +1257,7 @@ grant execute on function public.get_availability(date, date, uuid[], text) to a
 grant execute on function public.quote_order(jsonb) to anon, authenticated;
 grant execute on function public.place_order(jsonb) to anon, authenticated;
 grant execute on function public.get_order(text, text) to anon, authenticated;
-grant execute on function public.submit_payment_proof(text, text, text, text, int) to anon, authenticated;
+grant execute on function public.submit_payment_proof(text, text, text, text, int, text) to anon, authenticated;
 grant execute on function public.my_profile() to authenticated;
 grant execute on function public.my_save_occasion(jsonb) to authenticated;
 grant execute on function public.my_update_profile(jsonb) to authenticated;

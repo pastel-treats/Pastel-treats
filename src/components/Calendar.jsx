@@ -9,13 +9,19 @@ const monthStart = (iso) => iso.slice(0, 8) + '01'
 const monthEnd = (iso) => { const [y, m] = iso.split('-').map(Number); return `${y}-${pad(m)}-${pad(new Date(Date.UTC(y, m, 0)).getUTCDate())}` }
 const shiftMonth = (iso, n) => { const [y, m] = iso.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-01` }
 
+// days the baker closed (or that filled up) are shown and explained, instead of just greyed out
+const fullDay = (info) => !!info?.reason && info.reason !== 'Closed'
+const closedText = (r) => (/^(fully booked|sold out|deliveries full)/i.test(r || '') ? 'Overwhelmed with orders for the day' : r)
+
 // Month calendar that asks the server which dates/slots are bookable
 export default function Calendar({ productIds, mode, date, slotId, onChange, tz, maxMonthsAhead = 4, onMeta, dateOnly = false }) {
   const today = todayISO(tz)
   const [month, setMonth] = useState(monthStart(date || today))
   const [av, setAv] = useState(null)
   const [err, setErr] = useState(null)
+  const [why, setWhy] = useState(null) // message for a tapped closed date
   const key = productIds.join(',') + mode + month
+  useEffect(() => { setWhy(null) }, [key])
 
   useEffect(() => {
     let live = true
@@ -59,14 +65,23 @@ export default function Calendar({ productIds, mode, date, slotId, onChange, tz,
             if (!d) return <div key={'e' + i} />
             const info = days[d]
             const ok = info?.available
+            const full = !ok && fullDay(info)
             return (
-              <button key={d} type="button" className={'cal-day' + (ok ? ' ok' : ' off') + (d === date ? ' sel' : '') + (d === today ? ' today' : '')}
-                disabled={!ok} title={info?.reason || (ok ? 'Available' : d < today ? 'Past' : 'Not enough notice')}
-                onClick={() => onChange({ date: d, slotId: null, slotLabel: null })} aria-label={`${d}${ok ? '' : ' unavailable'}`}>
+              <button key={d} type="button" className={'cal-day' + (ok ? ' ok' : full ? ' full' : ' off') + (d === date ? ' sel' : '') + (d === today ? ' today' : '')}
+                disabled={!ok && !full} title={info?.reason || (ok ? 'Available' : d < today ? 'Past' : 'Not enough notice')}
+                onClick={() => { if (!ok) return setWhy({ date: d, text: closedText(info.reason) }); setWhy(null); onChange({ date: d, slotId: null, slotLabel: null }) }}
+                aria-label={`${d}${ok ? '' : full ? ' closed: ' + info.reason : ' unavailable'}`}>
                 {+d.slice(8)}
               </button>
             )
           })}
+        </div>
+      )}
+      {av && av.days.some((x) => !x.available && fullDay(x)) && <div className="cal-legend tiny"><span className="cal-key full" /> Closed for orders — tap to see why</div>}
+      {why && (
+        <div className="notice warn small fade-in" role="status" style={{ marginTop: 12 }}>
+          <b>{fmtDate(why.date, { weekday: true })} — {why.text}</b>
+          <div>Please choose a different date, or kindly come back later. 💚</div>
         </div>
       )}
       {selDay && dateOnly && <p className="small" style={{ marginTop: 12 }}>📦 We’ll dispatch your courier on <b>{fmtDate(date, { weekday: true })}</b>. No time slot needed.</p>}
