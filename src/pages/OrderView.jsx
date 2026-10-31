@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import PhoneInput from '../components/PhoneInput.jsx'
+import { upiAppLinks } from '../components/UpiPayBox.jsx'
 import { useStore } from '../store.jsx'
 import { api } from '../api/index.js'
 import { inr, cleanError, itemSummary, statusLabel, STATUS_FLOW } from '../lib/format.js'
@@ -25,11 +26,13 @@ export function PaymentPanel({ o, phone, onPaid }) {
   const { settings: s, toast } = useStore()
   const [qr, setQr] = useState(null)
   const [big, setBig] = useState(false)
-  const [ref, setRef] = useState('')
   const [file, setFile] = useState(null)
+  const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
-  const dueAdvance = Math.max(o.advance_due - o.amount_paid, 0)
-  const due = dueAdvance > 0 ? dueAdvance : Math.max(o.total - o.amount_paid, 0)
+  const pendingAmt = (o.payments || []).filter((p) => p.status === 'pending' && p.kind !== 'refund').reduce((a, p) => a + p.amount, 0)
+  const covered = o.amount_paid + pendingAmt
+  const dueAdvance = Math.max(o.advance_due - covered, 0)
+  const due = dueAdvance > 0 ? dueAdvance : Math.max(o.total - covered, 0)
   const link = s.upi_id ? upiLink({ upiId: s.upi_id, name: s.upi_name || s.business_name, amount: due, note: `Order ${o.order_number}` }) : null
   useEffect(() => { if (link) QRCode.toDataURL(link, { width: 440, margin: 1, color: { dark: '#20543f', light: '#ffffff' } }).then(setQr) }, [link])
   const pendingProof = o.payments?.some((p) => p.status === 'pending' && p.kind !== 'refund')
@@ -37,18 +40,16 @@ export function PaymentPanel({ o, phone, onPaid }) {
   if (o.quote_status === 'pending') return <div className="notice warn"><Icon name="sparkle" size={20} /><div><b>We’re reviewing your custom design.</b> You’ll get the final price on WhatsApp — please pay the advance only after that.</div></div>
   if (o.needs_delivery_approval && !['confirmed', 'advance_received'].includes(o.status)) return <div className="notice warn"><Icon name="map" size={20} /><div><b>{o.fulfilment === 'courier' ? 'We’re working out your courier charge.' : 'Checking delivery to your address.'}</b> We’ll confirm on WhatsApp before you pay.</div></div>
   if (['cancelled', 'refunded', 'refund_pending', 'completed'].includes(o.status) || due <= 0) return null
-  if (pendingProof) return <div className="notice info"><Icon name="clock" size={20} /><div><b>Payment details received.</b> The baker is checking your payment in her UPI app and will confirm your order. You don’t need to pay again.</div></div>
   if (o.payment_method === 'cash' && o.amount_paid === 0) return <div className="notice info"><Icon name="wallet" size={20} /><div>You chose <b>cash</b>. Please pay {inr(o.total)} at {o.fulfilment === 'pickup' ? 'pickup' : 'delivery'}. We’ll confirm your order on WhatsApp.</div></div>
 
-  async function sendProof() {
-    if (!ref.trim() && !file) return toast('Enter the UPI transaction ID (UTR) or attach a screenshot', true)
+  async function sendProof(f = file) {
+    if (!f) return toast('Please upload the payment screenshot', true)
     setBusy(true)
     try {
-      let path = null
-      if (file) path = await api.uploadFile('proof', await compressImage(file, 1200))
-      await api.submitProof(o.order_number, phone, ref.trim(), path, due)
-      toast('Thank you! We’ll verify your payment shortly.')
-      setRef(''); setFile(null); onPaid()
+      const path = await api.uploadFile('proof', await compressImage(f, 1400))
+      await api.submitProof(o.order_number, phone, `${o.order_number}-${Math.round(Date.now() / 60000)}`, path, due)
+      toast('Thank you! Your payment screenshot was sent to the baker.')
+      setFile(null); setPreview(null); onPaid()
     } catch (e) { toast(cleanError(e), true) } finally { setBusy(false) }
   }
   async function payOnline() {
@@ -70,10 +71,8 @@ export function PaymentPanel({ o, phone, onPaid }) {
     } catch (e) { toast(cleanError(e), true); setBusy(false) }
   }
 
-  return (
-    <div className="card" id="pay">
-      <div className="card-title">{dueAdvance > 0 ? `Pay your advance: ${inr(due)}` : `Pay the balance: ${inr(due)}`}</div>
-      {pendingProof && <div className="notice info small" style={{ marginBottom: 12 }}><Icon name="clock" size={18} /> We’ve received your payment details and are verifying them. You don’t need to pay again.</div>}
+  const body = (
+    <>
       {s.gateway_enabled && o.payment_method === 'gateway' && (
         <button className="btn btn-primary btn-block" disabled={busy} onClick={payOnline} style={{ marginBottom: 14 }}>Pay {inr(due)} online</button>
       )}
@@ -84,12 +83,16 @@ export function PaymentPanel({ o, phone, onPaid }) {
             <div className="small center"><b>{s.upi_name || s.business_name}</b>{link ? ` · ${inr(due)}` : ''}<br /><span className="muted tiny">Check the payee name shows “{s.upi_name || s.business_name}” before you pay.</span></div>
             <button className="btn btn-soft btn-sm" onClick={() => setBig(true)}>Show larger</button>
           </div>
-          {link && <a href={link} className="btn btn-primary btn-block hide-lg">Open GPay / PhonePe / Paytm</a>}
+          {link && (
+            <div className="upi-apps hide-lg">
+              {upiAppLinks(link).map(([n, href, c]) => <a key={n} href={href} className="upi-app" style={{ '--c': c }}><span className="dot" aria-hidden="true">{n === 'Other UPI app' ? '₹' : n[0]}</span>{n === 'Other UPI app' ? 'Other UPI app' : `Pay with ${n}`}</a>)}
+            </div>
+          )}
           {s.upi_id && (
             <div className="copy"><span className="grow">{s.upi_id}</span>
               <button className="btn btn-white btn-sm" onClick={() => { navigator.clipboard?.writeText(s.upi_id); toast('UPI ID copied') }}><Icon name="copy" size={16} /> Copy</button></div>
           )}
-          <div className="tiny muted">Add <b>{o.order_number}</b> in the payment note.</div>
+          <div className="tiny muted">The payment note already says <b>Order {o.order_number}</b>.</div>
           {s.upi_id && (
             <details className="pay-help">
               <summary className="small">UPI app says “couldn’t verify” or won’t open?</summary>
@@ -102,23 +105,69 @@ export function PaymentPanel({ o, phone, onPaid }) {
             </details>
           )}
           <hr className="soft" />
-          <b className="small">After paying, tell us:</b>
-          <Field label="UPI transaction ID / UTR" hint="12 digits, from your UPI app"><input className="input" value={ref} onChange={(e) => setRef(e.target.value)} inputMode="numeric" /></Field>
-          <label className="dropzone small">
-            <input type="file" accept={ACCEPT_IMG} hidden onChange={(e) => setFile(e.target.files[0] || null)} />
-            <Icon name="upload" size={18} /> {file ? file.name : 'Or attach the payment screenshot'}
+          <label className="proof-drop">
+            <input type="file" accept={ACCEPT_IMG} hidden disabled={busy} onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) { setFile(f); setPreview(URL.createObjectURL(f)); sendProof(f) } }} />
+            {preview ? <img src={preview} alt="Your payment screenshot" className="proof-prev" /> : <span className="big" aria-hidden="true">📸</span>}
+            <b>{busy ? 'Sending…' : 'After paying, upload the screenshot'}</b>
+            <span className="tiny muted">It goes straight to the baker — no forms to fill.</span>
           </label>
-          <button className="btn btn-primary btn-block" disabled={busy} onClick={sendProof}>{busy ? 'Sending…' : 'I’ve paid — notify the baker'}</button>
-          <p className="tiny muted">Your order is marked paid only after the baker checks the payment in the bank/UPI app.</p>
+          {file && !busy && <button className="btn btn-primary btn-block" onClick={() => sendProof()}>Send screenshot again</button>}
         </div>
       ) : (
         <div className="notice warn small">The bakery hasn’t added its UPI details yet. Please contact us on WhatsApp to pay.</div>
+      )}
+    </>
+  )
+  return (
+    <div className="card" id="pay">
+      {dueAdvance > 0 ? (
+        <><div className="card-title">Pay your advance: {inr(due)}</div>{body}</>
+      ) : (
+        <details className="pay-help">
+          <summary><b>Want to pay the balance of {inr(due)} now by UPI?</b> <span className="tiny muted">(optional — you can also pay {o.fulfilment === 'pickup' ? 'at pickup' : 'later'})</span></summary>
+          <div style={{ marginTop: 12 }}>{body}</div>
+        </details>
       )}
       {big && (
         <div className="modal-bg" onClick={() => setBig(false)} style={{ alignItems: 'center' }}>
           <div style={{ background: '#fff', padding: 18, borderRadius: 24 }}><img src={qr || s.upi_qr_url} alt="UPI QR code" style={{ width: 'min(86vw, 420px)' }} /><p className="center small">Tap anywhere to close</p></div>
         </div>
       )}
+    </div>
+  )
+}
+
+// What the customer has paid (and when) and what is left to pay
+export function paymentTotals(o) {
+  const pays = (o.payments || []).filter((p) => p.kind !== 'refund' && ['verified', 'pending'].includes(p.status))
+  const pending = pays.filter((p) => p.status === 'pending').reduce((a, p) => a + p.amount, 0)
+  const paid = o.amount_paid + pending
+  return { pays, pending, paid, balance: Math.max(o.total - paid, 0) }
+}
+export function PaymentSummary({ o }) {
+  const { pays, pending, paid, balance } = paymentTotals(o)
+  if (['cancelled', 'refunded', 'refund_pending'].includes(o.status)) return null
+  if (!pays.length && o.quote_status === 'pending') return null
+  const where = o.fulfilment === 'pickup' ? 'at pickup — cash or UPI' : o.fulfilment === 'courier' ? 'before we dispatch your courier' : 'on delivery'
+  return (
+    <div className="card pay-summary">
+      <div className="card-title">Payments</div>
+      {pays.length === 0 && <p className="small muted" style={{ margin: '0 0 6px' }}>No payment yet. Advance needed to confirm your order: <b>{inr(o.advance_due)}</b>.</p>}
+      {pays.map((p, i) => (
+        <div className="row-pay" key={i}>
+          <div>
+            <b>{p.kind === 'balance' ? 'Balance' : 'Advance'} paid · {inr(p.amount)}</b>
+            <div className="tiny muted">{fmtDateTime(p.at)} · {p.method === 'cash' ? 'Cash' : 'UPI'}</div>
+          </div>
+          {p.status === 'verified' ? <span className="badge t-mint">✓ Received</span> : <span className="badge t-butter">Checking</span>}
+        </div>
+      ))}
+      {pending > 0 && <p className="tiny muted" style={{ margin: '6px 0 0' }}>The baker is matching your screenshot with her UPI app — you don’t need to pay again.</p>}
+      <div className={'bal' + (balance === 0 ? ' zero' : '')}>
+        <div><b>{balance === 0 ? 'Fully paid' : 'Balance to pay'}</b>{balance > 0 && <div className="tiny muted">{where}</div>}</div>
+        <b style={{ fontSize: '1.25rem' }}>{balance === 0 ? '✓' : inr(balance)}</b>
+      </div>
+      {paid > 0 && <div className="tiny muted" style={{ marginTop: 6 }}>Total {inr(o.total)} · paid {inr(paid)}</div>}
     </div>
   )
 }
@@ -146,8 +195,8 @@ export function OrderDetails({ o }) {
         {o.discount > 0 && <div className="ln"><span>Discount</span><span>−{inr(o.discount)}</span></div>}
         <div className="ln total"><span>Total</span><span>{inr(o.total)}</span></div>
         <div className="ln"><span>Advance required</span><span>{inr(o.advance_due)}</span></div>
-        <div className="ln"><span>Paid (verified)</span><span>{inr(o.amount_paid)}</span></div>
-        <div className="ln" style={{ fontWeight: 600 }}><span>Balance due</span><span>{inr(o.total - o.amount_paid)}</span></div>
+        <div className="ln"><span>Paid so far{paymentTotals(o).pending ? ' (incl. being checked)' : ''}</span><span>{inr(paymentTotals(o).paid)}</span></div>
+        <div className="ln" style={{ fontWeight: 600 }}><span>Balance to pay</span><span>{inr(paymentTotals(o).balance)}</span></div>
       </div>
     </div>
   )
@@ -231,6 +280,8 @@ export default function OrderView() {
   const [err, setErr] = useState(null)
   const [loading, setLoading] = useState(!!known)
   const isNew = sp.get('new') === '1'
+  const paidNow = +sp.get('paid') || 0
+  const first = (n) => { const w = (n || '').trim().split(/\s+/)[0] || ''; return w.charAt(0) + w.slice(1).toLowerCase() }
 
   const load = useCallback(async (ph = phone) => {
     setLoading(true)
@@ -275,15 +326,16 @@ export default function OrderView() {
       {isNew && (
         <div className="card center fade-in" style={{ background: 'var(--mint)', marginBottom: 16 }}>
           <svg className="success-art" viewBox="0 0 96 96" aria-hidden="true"><circle cx="48" cy="48" r="44" fill="#fff" /><path d="m30 49 12 12 25-26" stroke="#20543f" strokeWidth="6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          <h2 style={{ marginTop: 10 }}>Thank you, {o.customer_name.split(' ')[0]}!</h2>
-          <p style={{ margin: '6px 0 0' }}>Your order request has been received.</p>
+          <h2 style={{ marginTop: 10 }}>Thank you, {first(o.customer_name)}!</h2>
+          <p style={{ margin: '6px 0 0' }}>{paidNow ? <>Your advance of <b>{inr(paidNow)}</b> is paid and <b>your order is placed</b>. 🎉</> : 'Your order request has been received.'}</p>
           <div className="card flat" style={{ margin: '12px auto 0', maxWidth: 360, background: '#fff' }}>
             <div className="tiny muted">Order ID</div>
             <div className="serif" style={{ fontSize: '1.7rem', fontWeight: 700, color: 'var(--forest)', letterSpacing: '0.02em' }}>{o.order_number}</div>
             <div className="small muted">Mobile {prettyPhone(phone || known?.phone)}</div>
+            {paidNow > 0 && <div className="small" style={{ marginTop: 6 }}>Advance paid <b>{inr(paidNow)}</b> · Balance <b>{inr(paymentTotals(o).balance)}</b></div>}
           </div>
           {s.whatsapp && <a className="btn btn-primary" style={{ marginTop: 12 }} href={waLink(s.whatsapp, orderMessage(o, phone || known?.phone))} target="_blank" rel="noreferrer"><WaIcon size={18} /> Send my order details on WhatsApp</a>}
-          <p className="small" style={{ margin: '4px 0 0' }}>{o.status === 'awaiting_payment' ? 'Pay the advance below to secure your slot.' : 'The baker will review it and message you on WhatsApp.'}</p>
+          <p className="small" style={{ margin: '4px 0 0' }}>{paidNow ? 'The baker checks the payment and confirms your order on WhatsApp.' : o.status === 'awaiting_payment' ? 'Pay the advance below to secure your slot.' : 'The baker will review it and message you on WhatsApp.'}</p>
           <p className="tiny muted" style={{ margin: '6px 0 0' }}>Sending it on WhatsApp also keeps your <b>private order link</b> in the chat — tap it any time to check your order.</p>
         </div>
       )}
@@ -294,6 +346,7 @@ export default function OrderView() {
       </div>
       <div className="co" style={{ paddingTop: 0 }}>
         <div className="stack">
+          <PaymentSummary o={o} />
           <PaymentPanel o={o} phone={phone || known?.phone} onPaid={() => load(phone || known?.phone)} />
           <div className="card">
             <div className="row between"><div className="card-title">{confirmed ? 'Confirmed schedule' : 'Requested schedule'}</div>{!confirmed && <span className="badge t-butter">Tentative</span>}</div>

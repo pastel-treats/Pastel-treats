@@ -14,7 +14,9 @@ export function platform() {
   const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || ''
   const iPadOS = /Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1
   if (/iPhone|iPad|iPod/.test(ua) || iPadOS) return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'ios-other' : 'ios'
-  if (/Android/.test(ua)) return 'android'
+  // Only Google Chrome installs the app as a Google-signed package. Samsung Internet & other Android browsers
+  // build their own package, which Google Play Protect blocks as "Unsafe app" — so we send those to Chrome.
+  if (/Android/.test(ua)) return /SamsungBrowser|OPR\/|Opera|EdgA|Firefox|MiuiBrowser|HeyTapBrowser|VivoBrowser|UCBrowser|YaBrowser|DuckDuckGo|; wv\)/.test(ua) || !/Chrome\/\d/.test(ua) ? 'android-other' : 'android'
   return 'desktop'
 }
 
@@ -39,7 +41,7 @@ export function useInstall() {
   const [, force] = useState(0)
   useEffect(() => { const fn = () => force((n) => n + 1); listeners.add(fn); return () => listeners.delete(fn) }, [])
   return {
-    canPrompt: !!deferred,
+    canPrompt: !!deferred && ['android', 'desktop'].includes(platform()),
     installed: isInstalled(),
     platform: platform(),
     async prompt() {

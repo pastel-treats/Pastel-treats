@@ -26,7 +26,7 @@ export default function Cart() {
       <div className="card">
         {lines.map(({ l, p, line, err }) => (
           <div className="line-item" key={l.key}>
-            <div className="th"><ProductImage product={p} /></div>
+            <div className="th"><ProductImage product={p} thumb /></div>
             <div className="grow">
               <div className="row between" style={{ alignItems: 'flex-start' }}>
                 <div className="serif" style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--forest)' }}>{p?.name || 'Item'}</div>

@@ -651,12 +651,17 @@ end $$;
 
 create or replace function public.calc_advance(total int) returns int
 language plpgsql stable security definer set search_path = public as $$
-declare mode text; val numeric;
+declare mode text; val numeric; d jsonb;
 begin
-  select coalesce(data ->> 'advance_mode', 'percent'), coalesce((data ->> 'advance_value')::numeric, 50)
-    into mode, val from settings where id = 1;
+  select data into d from settings where id = 1;
+  -- bigger orders (above the chosen amount) can have their own advance rule
+  if coalesce((d ->> 'advance_tier_enabled')::boolean, false) and total > coalesce((d ->> 'advance_tier_above')::numeric, 0) then
+    mode := coalesce(d ->> 'advance_tier_mode', 'percent'); val := coalesce((d ->> 'advance_tier_value')::numeric, 50);
+  else
+    mode := coalesce(d ->> 'advance_mode', 'percent'); val := coalesce((d ->> 'advance_value')::numeric, 50);
+  end if;
   if mode = 'fixed' then return least(total, val::int); end if;
-  return ceil(total * val / 100.0)::int;
+  return least(total, ceil(total * val / 100.0)::int);
 end $$;
 
 -- Quote endpoint for the checkout page (same maths as place_order)
@@ -692,8 +697,9 @@ declare
   v_custom boolean; needs_zone boolean := false; o orders; num text; v_method text := coalesce(p ->> 'payment_method', 'upi');
   s jsonb; avail jsonb; slot_ok boolean; prod_ids uuid[]; v_status text; refs text[];
 begin
-  -- duplicate submission protection
+  -- duplicate submission protection (double taps / network retries arriving at the same moment wait for each other)
   if p ->> 'idempotency_key' is not null then
+    perform pg_advisory_xact_lock(hashtext('pt-idem-' || (p ->> 'idempotency_key')));
     select * into o from orders where idempotency_key = p ->> 'idempotency_key';
     if found then
       return jsonb_build_object('order_number', o.order_number, 'duplicate', true, 'total', o.total, 'advance_due', o.advance_due, 'status', o.status, 'link_token', o.access_token);
@@ -702,11 +708,16 @@ begin
 
   if coalesce(trim(p ->> 'name'), '') = '' then raise exception 'INVALID: please enter your name'; end if;
   if v_phone is null then raise exception 'INVALID: please enter a valid mobile number'; end if;
-  -- flood protection: max 3 new orders per mobile per hour, 40 per hour for the whole shop
-  if (select count(*) from orders where phone = v_phone and created_at > now() - interval '1 hour') >= 3 then
-    raise exception 'RATE_LIMIT: you have placed several orders just now — please wait a little or message us on WhatsApp';
+  -- flood protection (stops spam / bots): max 5 new orders per mobile per hour (cancelled ones don't count),
+  -- 60 per hour for the whole shop. A customer can put up to 10 items in ONE order, so 5 orders an hour is plenty.
+  if (select count(*) from orders where phone = v_phone and created_at > now() - interval '1 hour'
+        and status not in ('cancelled','refunded','refund_pending')) >= 5 then
+    raise exception 'RATE_LIMIT: you have already placed 5 orders from this mobile number in the last hour. Please try again in about % minutes, or message us on WhatsApp and we will add it for you',
+      greatest(1, ceil(extract(epoch from (
+        (select min(created_at) from (select created_at from orders where phone = v_phone and created_at > now() - interval '1 hour'
+           and status not in ('cancelled','refunded','refund_pending') order by created_at desc limit 5) t) + interval '1 hour' - now())) / 60)::int);
   end if;
-  if (select count(*) from orders where created_at > now() - interval '1 hour') >= 40 then
+  if (select count(*) from orders where created_at > now() - interval '1 hour') >= 60 then
     raise exception 'RATE_LIMIT: we are receiving a lot of orders right now — please try again shortly or message us on WhatsApp';
   end if;
   if coalesce(jsonb_array_length(p -> 'items'), 0) = 0 then raise exception 'INVALID: your cart is empty'; end if;
@@ -715,7 +726,9 @@ begin
   if not coalesce((p ->> 'accepted_policies')::boolean, false) then raise exception 'INVALID: please accept the ordering policy'; end if;
 
   s := (select data from settings where id = 1);
-  if coalesce((s ->> 'orders_paused')::boolean, false) then
+  -- closed for orders (optionally until a reopen date, in bakery time)
+  if coalesce((s ->> 'orders_paused')::boolean, false)
+     and (nullif(s ->> 'orders_paused_until', '') is null or (now() at time zone tz)::date < (s ->> 'orders_paused_until')::date) then
     raise exception 'PAUSED: %', coalesce(nullif(s ->> 'orders_paused_message', ''), 'We are not taking new orders right now.');
   end if;
   if p ->> 'fulfilment' = 'delivery' and not coalesce((s ->> 'home_delivery_enabled')::boolean, false) then
@@ -957,9 +970,13 @@ begin
   if not found then return jsonb_build_object('error', 'NOT_FOUND: order not found'); end if;
   if o.status in ('cancelled','refunded','refund_pending','completed') then raise exception 'INVALID: this order is closed'; end if;
   if coalesce(trim(p_reference), '') = '' and coalesce(p_proof_path, '') = '' then
-    raise exception 'INVALID: please enter the UPI transaction ID or upload a screenshot';
+    raise exception 'INVALID: please upload the payment screenshot';
   end if;
   if p_proof_path is not null and p_proof_path <> '' and p_proof_path not like 'proof/%' then raise exception 'INVALID: bad file path'; end if;
+  -- the same payment sent twice (retry / double tap) is recorded once
+  if nullif(trim(p_reference), '') is not null and exists (select 1 from payments where order_id = o.id and reference = trim(p_reference) and status <> 'rejected') then
+    return order_public_view(o);
+  end if;
   insert into payments(order_id, kind, method, amount, reference, status, proof_path, note)
   values (o.id, case when o.amount_paid >= o.advance_due then 'balance' else 'advance' end, 'upi',
           greatest(coalesce(p_amount, o.advance_due - o.amount_paid), 0), nullif(trim(p_reference), ''), 'pending', nullif(p_proof_path, ''),

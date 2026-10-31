@@ -6,14 +6,24 @@ const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'nul
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* private mode */ } }
 
 export function StoreProvider({ children }) {
-  const [data, setData] = useState(null)
+  // last menu is kept on the phone: the shop opens instantly and still shows the menu if the network is slow
+  const [data, setData] = useState(() => read('pt-menu-cache', null))
   const [error, setError] = useState(null)
   const [cart, setCart] = useState(() => read('pt-cart-v2', []))
   const [toasts, setToasts] = useState([])
   const [myOrders, setMyOrders] = useState(() => read('pt-my-orders', []))
 
   const reload = useCallback(async () => {
-    try { setData(await api.loadStore()); setError(null) } catch (e) { setError(e.message) }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const d = await api.loadStore()
+        setData(d); setError(null); write('pt-menu-cache', d)
+        return
+      } catch (e) {
+        if (attempt === 2) { setError(e.message); return }
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
+      }
+    }
   }, [])
   useEffect(() => { reload() }, [reload])
   useEffect(() => write('pt-cart-v2', cart), [cart])

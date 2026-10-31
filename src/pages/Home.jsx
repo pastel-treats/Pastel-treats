@@ -5,16 +5,17 @@ import ProductCard from '../components/ProductCard.jsx'
 import { Icon, WaIcon } from '../components/ui.jsx'
 import { waLink } from '../lib/contact.js'
 import { leadLabel } from '../lib/format.js'
-import { activeAnnouncements, KINDS } from '../lib/announcements.js'
+import { activeAnnouncements, KINDS, ordersClosed, closedMessage } from '../lib/announcements.js'
 import { fmtDate } from '../lib/dates.js'
 import { LocationCard, MeetBaker } from './Info.jsx'
 import { InstallBanner } from './GetApp.jsx'
 import { api } from '../api/index.js'
 
 const KITCHEN = [
-  ['images/ai-kitchen-combi-oven.svg', 'Unox combi oven', 'Professional Italian oven with steam and even heat — the secret behind our soft sponges and crisp choux.'],
-  ['images/ai-kitchen-mixer-green.svg', 'KitchenAid stand mixer · pastel green', 'Silky buttercream, airy mousse and perfect meringue, whipped by a pro mixer.'],
-  ['images/ai-kitchen-mixer-red.svg', 'KitchenAid stand mixer · red', 'Our second mixer, so dough and cream never wait — every batch made fresh.'],
+  ['images/kitchen.webp', 'Our baking kitchen', 'A clean, bright kitchen where every order is baked fresh, in small batches.', true],
+  ['images/kitchen-oven.webp', 'Unox Bakerlux SHOP.Pro oven', 'Professional Italian oven with even, steady heat — the secret behind our soft sponges and crisp choux.', true],
+  ['images/kitchen-mixer-green.webp', 'KitchenAid stand mixer · pastel green', 'Silky buttercream, airy mousse and glossy meringue, whipped by a pro mixer.', true, true],
+  ['images/kitchen-mixer-red.webp', 'KitchenAid stand mixer · red', 'Our second mixer, so batter and cream never wait — every batch made fresh.', true, true],
 ]
 
 // Approved reviews only (the baker picks them in the dashboard)
@@ -92,11 +93,11 @@ export default function Home() {
 
       <InstallBanner />
 
-      {(news.length > 0 || s.orders_paused) && (
+      {(news.length > 0 || ordersClosed(s)) && (
         <section className="wrap" id="news" style={{ paddingTop: 24 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Announcements</div>
           <div className="stack">
-            {s.orders_paused && <div className="card" style={{ background: 'var(--pink)' }}><b className="serif" style={{ fontSize: '1.3rem', color: 'var(--rose-deep)' }}>⏸️ Not taking new orders right now</b><p style={{ margin: '4px 0 0' }}>{s.orders_paused_message}</p></div>}
+            {ordersClosed(s) && <div className="card" style={{ background: 'var(--pink)' }}><b className="serif" style={{ fontSize: '1.3rem', color: 'var(--rose-deep)' }}>⏸️ Not taking new orders right now</b><p style={{ margin: '4px 0 0' }}>{closedMessage(s)}{s.orders_paused_until ? ` Orders open again on ${fmtDate(s.orders_paused_until, { weekday: true })}.` : ''}</p></div>}
             {news.map((a) => (
               <div key={a.id} className="card" style={{ background: a.kind === 'closed' ? 'var(--pink)' : a.kind === 'leave' ? 'var(--peach)' : a.kind === 'offer' ? 'var(--butter)' : 'var(--mint-wash)' }}>
                 <div className="tiny muted">{KINDS[a.kind]?.icon} {KINDS[a.kind]?.label}{a.from ? ` · ${fmtDate(a.from)}${a.to && a.to !== a.from ? ' – ' + fmtDate(a.to) : ''}` : ''}</div>
@@ -193,13 +194,13 @@ export default function Home() {
         <div className="wrap">
           <div className="eyebrow">Our kitchen</div>
           <h2>Baked with the best equipment</h2>
-          <p className="muted" style={{ margin: '6px 0 18px', maxWidth: 640 }}>A professional kitchen at home: the same ovens and mixers used by top patisseries, so every bake comes out just right.</p>
+          <p className="muted" style={{ margin: '6px 0 18px', maxWidth: 640 }}>A professional kitchen at home — the same ovens and mixers used by top patisseries, so every bake comes out just right.</p>
           <div className="kitchen-grid">
-            {KITCHEN.map(([img, t, d]) => (
-              <figure key={t} className="kit">
+            {KITCHEN.map(([img, t, d, real, tall]) => (
+              <figure key={t} className={'kit' + (real ? ' real' : '') + (tall ? ' tall' : '')}>
                 <img src={img} alt={t} loading="lazy" />
                 <figcaption><b>{t}</b><span className="small muted">{d}</span></figcaption>
-                <span className="ai-tag">Illustration</span>
+                <span className="ai-tag">{real ? 'Real photo' : 'Illustration'}</span>
               </figure>
             ))}
           </div>

@@ -4,7 +4,9 @@ import { useStore } from '../store.jsx'
 import { Icon, WaIcon } from './ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 import { isDemo } from '../api/index.js'
-import { activeAnnouncements, KINDS } from '../lib/announcements.js'
+import { activeAnnouncements, KINDS, ordersClosed, closedMessage } from '../lib/announcements.js'
+import { fmtDate } from '../lib/dates.js'
+import AnnouncementPopup from './AnnouncementPopup.jsx'
 
 export default function Layout() {
   const { settings: s, cart } = useStore()
@@ -16,7 +18,7 @@ export default function Layout() {
   return (
     <div className="has-tabbar">
       {isDemo && <div className="demo-bar">Demo mode — orders are saved only on this device until the bakery database is connected.</div>}
-      {s.orders_paused ? <div className="promo" style={{ background: 'var(--rose-deep)' }}>⏸️ {s.orders_paused_message || 'We are not taking new orders right now.'}</div>
+      {ordersClosed(s) ? <div className="promo" style={{ background: 'var(--rose-deep)' }}>⏸️ {closedMessage(s)}{s.orders_paused_until ? ` · Orders open again on ${fmtDate(s.orders_paused_until)}` : ''}</div>
         : top ? <Link to="/" className="promo" style={{ display: 'block', textDecoration: 'none' }}>{KINDS[top.kind]?.icon} {top.title}{top.message ? ` — ${top.message}` : ''}</Link>
         : s.promo_banner && <div className="promo">{s.promo_banner}</div>}
       <header className="topbar">
@@ -36,6 +38,7 @@ export default function Layout() {
       </header>
 
       <main><Outlet /></main>
+      <AnnouncementPopup />
 
       <footer className="footer">
         <div className="wrap cols">
@@ -44,7 +47,7 @@ export default function Layout() {
             <p className="small" style={{ maxWidth: 360 }}><b>{s.brand_line || 'Premium home baker'}</b> · Dindigul</p>
           </div>
           <div>
-            <h4>Say hello</h4>
+            <h2 className="footer-h">Say hello</h2>
             <ul>
               {s.whatsapp && <li><a href={waLink(s.whatsapp, 'Hi Pastel Treats!')} target="_blank" rel="noreferrer">WhatsApp</a></li>}
               {s.phone && <li>{callsToday(s) ? <a href={telLink(s.phone)}>{s.phone}</a> : <span title={NO_CALL_NOTE}>{s.phone} (no calls on Sunday)</span>}</li>}
@@ -55,7 +58,7 @@ export default function Layout() {
             </ul>
           </div>
           <div>
-            <h4>Good to know</h4>
+            <h2 className="footer-h">Good to know</h2>
             <ul>
               <li><Link to="/policies#ordering">Ordering & cancellation</Link></li>
               <li><Link to="/policies#privacy">Privacy policy</Link></li>

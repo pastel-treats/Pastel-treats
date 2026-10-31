@@ -3,16 +3,16 @@ import { useAdmin, PageHead } from './AdminApp.jsx'
 import { api } from '../api/index.js'
 import { cleanError } from '../lib/format.js'
 import { fmtDate, addDaysISO, todayISO } from '../lib/dates.js'
-import { KINDS, activeAnnouncements } from '../lib/announcements.js'
+import { KINDS, activeAnnouncements, ordersClosed } from '../lib/announcements.js'
+import { Link } from 'react-router-dom'
 import { Field, Switch, Badge, Icon, Empty } from '../components/ui.jsx'
 
-const blank = () => ({ id: Math.random().toString(36).slice(2, 10), kind: 'info', title: '', message: '', from: '', to: '', active: true, block: false })
+const blank = () => ({ id: Math.random().toString(36).slice(2, 10), kind: 'info', title: '', message: '', from: '', to: '', active: true, popup: false, block: false })
 
 export default function Announcements() {
   const { settings, reload, toast } = useAdmin()
   const [form, setForm] = useState(blank())
   const [busy, setBusy] = useState(false)
-  const [pauseMsg, setPauseMsg] = useState(settings.orders_paused_message || 'We are on a short break and not taking new orders. Back soon!')
   const list = settings.announcements || []
   const live = new Set(activeAnnouncements(settings).map((a) => a.id))
   const save = async (patch, msg) => {
@@ -38,15 +38,12 @@ export default function Announcements() {
   }
   return (
     <>
-      <PageHead title="Announcement board" sub="Tell customers what’s happening — leave, holidays, festive specials. Shown on the home page and the top bar." />
+      <PageHead title="Announcements & pop-ups" sub="Tell customers what’s happening — leave, holidays, festive specials. Shown on the home page and the top bar, and as a pop-up if you choose." />
 
-      <div className="card stack" style={{ background: settings.orders_paused ? 'var(--pink)' : undefined }}>
-        <div className="row between wrap">
-          <div><b>Pause all new orders</b><div className="tiny muted">Use when you’re fully booked or away. Checkout is switched off until you turn this back on.</div></div>
-          <Switch checked={settings.orders_paused} onChange={(v) => save({ orders_paused: v, orders_paused_message: pauseMsg }, v ? 'New orders paused' : 'Orders are open again')} label={settings.orders_paused ? 'Paused' : 'Taking orders'} />
-        </div>
-        <Field label="Message customers will see"><input className="input" value={pauseMsg} onChange={(e) => setPauseMsg(e.target.value)} onBlur={() => settings.orders_paused && pauseMsg !== settings.orders_paused_message && save({ orders_paused_message: pauseMsg }, 'Message updated')} /></Field>
-      </div>
+      <Link to="/admin/shop" className={'card row between' + (ordersClosed(settings) ? ' closed-link' : '')} style={{ textDecoration: 'none', color: 'inherit', gap: 10 }}>
+        <div><b>{ordersClosed(settings) ? '🔴 Orders are closed' : '🟢 Taking orders'}</b><div className="tiny muted">Fully booked or away? Close orders in one tap →</div></div>
+        <span className="btn btn-white btn-sm">Open / close orders</span>
+      </Link>
 
       <div className="card stack" style={{ marginTop: 14 }}>
         <div className="card-title" style={{ margin: 0 }}>{list.some((x) => x.id === form.id) ? 'Edit announcement' : 'New announcement'}</div>
@@ -56,6 +53,10 @@ export default function Announcements() {
         <div className="grid-2">
           <Field label="Show from" hint="blank = now"><input type="date" className="input" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} /></Field>
           <Field label="Show until" hint="blank = until removed"><input type="date" className="input" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} /></Field>
+        </div>
+        <div className="popup-opt">
+          <Switch checked={!!form.popup} onChange={(v) => setForm({ ...form, popup: v })} label="Show as a pop-up when customers open the site" />
+          <div className="tiny muted">Big and hard to miss — each customer sees it once a day while it’s running. Great for festival offers, leave and launch news.</div>
         </div>
         {['leave', 'closed'].includes(form.kind) && form.from && (
           <label className="check"><input type="checkbox" checked={form.block} onChange={(e) => setForm({ ...form, block: e.target.checked })} /> Also stop pickups on these dates (blocks them in the order calendar)</label>
@@ -71,7 +72,7 @@ export default function Announcements() {
           <div className="list-row" key={a.id} style={{ alignItems: 'flex-start' }}>
             <span style={{ fontSize: '1.3rem' }}>{KINDS[a.kind]?.icon}</span>
             <div className="grow small">
-              <b>{a.title}</b> {live.has(a.id) ? <Badge tone="mint">showing now</Badge> : a.active === false ? <Badge tone="grey">hidden</Badge> : a.from > todayISO() ? <Badge tone="sky">scheduled</Badge> : <Badge tone="grey">ended</Badge>}
+              <b>{a.title}</b> {a.popup && <Badge tone="butter">pop-up</Badge>} {live.has(a.id) ? <Badge tone="mint">showing now</Badge> : a.active === false ? <Badge tone="grey">hidden</Badge> : a.from > todayISO() ? <Badge tone="sky">scheduled</Badge> : <Badge tone="grey">ended</Badge>}
               {a.message && <div className="tiny muted">{a.message}</div>}
               <div className="tiny muted">{a.from ? fmtDate(a.from) : 'From now'} → {a.to ? fmtDate(a.to) : 'until removed'}</div>
             </div>

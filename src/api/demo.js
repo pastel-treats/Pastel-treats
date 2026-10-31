@@ -218,7 +218,7 @@ export function createDemoApi() {
       if (!['pickup', 'delivery', 'courier'].includes(p.fulfilment)) err('INVALID: choose pickup or courier')
       if (!p.accepted_policies) err('INVALID: please accept the ordering policy')
       const s = db.settings
-      if (s.orders_paused) err('PAUSED: ' + (s.orders_paused_message || 'We are not taking new orders right now.'))
+      if (s.orders_paused && (!s.orders_paused_until || todayISO() < s.orders_paused_until)) err('PAUSED: ' + (s.orders_paused_message || 'We are not taking new orders right now.'))
       if (p.fulfilment === 'delivery' && !s.home_delivery_enabled) err('INVALID: home delivery is not available — please choose self pickup')
       const method = p.payment_method || 'upi'
       if (method === 'cash' && (s.cash_for || 'both') === 'balance') err('INVALID: the advance must be paid online/UPI; cash is accepted for the balance only')
@@ -338,7 +338,8 @@ export function createDemoApi() {
       const o = db.orders.find((x) => x.order_number === String(number).trim().toUpperCase() && x.phone === normalizePhone(phone))
       if (!o) err('NOT_FOUND: order not found')
       if (['cancelled', 'refunded', 'refund_pending', 'completed'].includes(o.status)) err('INVALID: this order is closed')
-      if (!String(reference || '').trim() && !path) err('INVALID: please enter the UPI transaction ID or upload a screenshot')
+      if (!String(reference || '').trim() && !path) err('INVALID: please upload the payment screenshot')
+      if (String(reference || '').trim() && db.payments.some((p) => p.order_id === o.id && p.reference === String(reference).trim() && p.status !== 'rejected')) return clone(view(db, o))
       db.payments.push({ id: uid(), order_id: o.id, kind: o.amount_paid >= o.advance_due ? 'balance' : 'advance', method: 'upi',
         amount: Math.max(amount ?? o.advance_due - o.amount_paid, 0), reference: reference?.trim() || null, status: 'pending', proof_path: path || null, note: 'Reported by customer', created_at: nowISO() })
       recalc(db, o.id)

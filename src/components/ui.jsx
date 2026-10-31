@@ -32,6 +32,7 @@ const paths = {
   wallet: <><rect x="3" y="6" width="18" height="14" rx="2" /><path d="M3 10h18" /><circle cx="16.5" cy="15" r="1" fill="currentColor" /></>,
   users: <><circle cx="9" cy="8" r="3.5" /><path d="M2 20a7 7 0 0 1 14 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a7 7 0 0 1 4 6" /></>,
   bell: <><path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
+  power: <><path d="M12 3v9" /><path d="M6.3 7.3a8 8 0 1 0 11.4 0" /></>,
   download: <><path d="M12 4v12" /><path d="m7 11 5 5 5-5" /><path d="M4 20h16" /></>,
   logout: <><path d="M15 4h4v16h-4" /><path d="M10 8l-4 4 4 4M6 12h10" /></>,
   sparkle: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />,
@@ -63,10 +64,15 @@ export function ProductArt({ name = '', seed = 0 }) {
 export const hashStr = (s = '') => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)
 export const isAiImage = (src) => /(^|\/)ai-[^/]*$/.test(src || '')
 // Small corner label: is this a real photo of her bake, or an AI illustration?
-export const ImageKind = ({ src }) => src ? <span className={'img-kind' + (isAiImage(src) ? ' ai' : '')}>{isAiImage(src) ? 'AI illustration' : 'Real photo'}</span> : null
-export function ProductImage({ product, index = 0, label = true }) {
+export const ImageKind = ({ src }) => src ? <span className={'img-kind' + (isAiImage(src) ? ' ai' : '')}>{isAiImage(src) ? 'Illustration' : 'Real photo'}</span> : null
+// Uploaded menu photos have a small copy ("….thumb.jpg") for cards; fall back to the full photo if it's missing
+export const thumbUrl = (src) => (/\/product-images\/products\/[^/?]+\.(jpg|jpeg|png|webp)$/i.test(src || '') ? src + '.thumb.jpg' : src)
+export function ProductImage({ product, index = 0, label = true, thumb = false }) {
   const src = product?.images?.[index]
-  if (src) return <>{<img src={src} alt={product.name} loading="lazy" />}{label && <ImageKind src={src} />}</>
+  if (src) {
+    const small = thumb ? thumbUrl(src) : src
+    return <>{<img src={small} alt={product.name} loading="lazy" decoding="async" onError={(e) => { if (e.currentTarget.src !== src) e.currentTarget.src = src }} />}{label && <ImageKind src={src} />}</>
+  }
   return <ProductArt name={product?.name} seed={hashStr(product?.name)} />
 }
 

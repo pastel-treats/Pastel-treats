@@ -6,6 +6,7 @@ import { quote as quoteCalc, findZone } from '../lib/pricing.js'
 import { inr, cleanError, itemSummary, OCCASIONS } from '../lib/format.js'
 import { normalizePhone } from '../lib/contact.js'
 import { fmtDate, todayISO, addDaysISO } from '../lib/dates.js'
+import { ordersClosed, closedMessage } from '../lib/announcements.js'
 import Calendar from '../components/Calendar.jsx'
 import PhoneInput, { validPhone } from '../components/PhoneInput.jsx'
 import PlaceSelect from '../components/PlaceSelect.jsx'
@@ -15,6 +16,7 @@ import UpiPayBox from '../components/UpiPayBox.jsx'
 import { PolicyText, LocationCard } from './Info.jsx'
 
 const DRAFT = 'pt-checkout-draft'
+const PAYKEY = 'pt-pay-pending'
 const loadDraft = () => { try { return JSON.parse(sessionStorage.getItem(DRAFT) || 'null') } catch { return null } }
 
 export default function Checkout() {
@@ -33,10 +35,30 @@ export default function Checkout() {
   const [busy, setBusy] = useState(false)
   const [policyOpen, setPolicyOpen] = useState(false)
   const [payStep, setPayStep] = useState(false) // UPI: pay first, then the order is placed
-  const [utr, setUtr] = useState('')
   const [proof, setProof] = useState(null)
+  const [proofPrev, setProofPrev] = useState(null)
   const idem = useRef(sessionStorage.getItem('pt-idem') || crypto.randomUUID())
   useEffect(() => { try { sessionStorage.setItem('pt-idem', idem.current) } catch { /* */ } }, [])
+  // short payment reference shown in the customer's UPI app note, so the baker can match the payment
+  const payRef = 'PT' + idem.current.replace(/-/g, '').slice(0, 5).toUpperCase()
+  // the customer left for GPay/PhonePe: remember it, so we can welcome them back (even if the phone reloaded this page)
+  const [paying, setPaying] = useState(() => { try { const p = JSON.parse(sessionStorage.getItem(PAYKEY) || 'null'); return p && p.idem === idem.current ? p : null } catch { return null } })
+  const [back, setBack] = useState(false)
+  useEffect(() => {
+    if (paying) { setPayStep(true); setF((x) => ({ ...x, accepted_policies: true })); setBack(true) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!paying) return
+    const onBack = () => { if (document.visibilityState === 'visible') { setBack(true); setTimeout(() => document.getElementById('pay-proof')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 250) } }
+    document.addEventListener('visibilitychange', onBack); window.addEventListener('focus', onBack); window.addEventListener('pageshow', onBack)
+    return () => { document.removeEventListener('visibilitychange', onBack); window.removeEventListener('focus', onBack); window.removeEventListener('pageshow', onBack) }
+  }, [paying])
+  const leftToPay = (app) => {
+    const p = { idem: idem.current, app, amount: q.advance_due, at: Date.now() }
+    try { sessionStorage.setItem(PAYKEY, JSON.stringify(p)) } catch { /* */ }
+    setPaying(p)
+  }
   useEffect(() => { try { sessionStorage.setItem(DRAFT, JSON.stringify({ ...f, accepted_policies: false })) } catch { /* */ } }, [f])
 
   // returning customer on this phone → prefill name & number (stored only on this device)
@@ -102,19 +124,25 @@ export default function Checkout() {
     return !Object.keys(e).length
   }
 
-  async function submit() {
+  async function submit(proofFile = proof) {
     if (busy || !validate()) return
     if (payFirst && !payStep) {
       setPayStep(true)
       setTimeout(() => document.getElementById('pay-now')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
       return
     }
-    if (payFirst && !utr.trim() && !proof) {
-      toast('After paying, enter the UPI transaction ID (UTR) or attach the payment screenshot', true)
+    if (payFirst && !proofFile) {
+      toast('After paying, please upload the payment screenshot', true)
       document.getElementById('pay-proof')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     setBusy(true)
+    // 1) upload the screenshot first — if this fails nothing is created, so the customer can simply try again
+    let proofPath = null
+    if (payFirst) {
+      try { proofPath = await api.uploadFile('proof', await compressImage(proofFile, 1400)) }
+      catch (e) { setBusy(false); return toast('Couldn’t upload the screenshot: ' + cleanError(e) + ' Please try again — you don’t need to pay again.', true) }
+    }
     const payload = {
       idempotency_key: idem.current,
       items: cart.map(({ key, ref_previews, ...rest }) => rest),
@@ -129,17 +157,20 @@ export default function Checkout() {
       const r = await api.placeOrder(payload)
       rememberOrder({ number: r.order_number, phone: normalizePhone(f.phone), at: new Date().toISOString(), status: r.status, link_token: r.link_token,
         items: (q.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '), total: r.total, date: f.date, fulfilment: f.fulfilment })
+      // 2) order is placed → attach the payment screenshot to it (retries if the network blips)
+      let proofSaved = !payFirst
       if (payFirst) {
-        try {
-          const path = proof ? await api.uploadFile('proof', await compressImage(proof, 1200)) : null
-          await api.submitProof(r.order_number, f.phone, utr.trim(), path, q.advance_due)
-        } catch (pe) { toast('Order placed. Please send your payment details again on the next screen: ' + cleanError(pe), true) }
+        for (let i = 0; i < 3 && !proofSaved; i++) {
+          try { await api.submitProof(r.order_number, f.phone, payRef, proofPath, q.advance_due); proofSaved = true }
+          catch (pe) { if (i === 2) toast('Order placed! Please send your payment screenshot again on the next screen: ' + cleanError(pe), true); else await new Promise((res) => setTimeout(res, 1200)) }
+        }
+        try { sessionStorage.removeItem(PAYKEY) } catch { /* */ }
       }
       try { localStorage.setItem('pt-last-details', JSON.stringify({ name: f.name.trim(), phone: f.phone, email: f.email, state: f.state, city: f.city.trim() })) } catch { /* */ }
       clearCart()
       sessionStorage.removeItem(DRAFT)
       sessionStorage.removeItem('pt-idem')
-      nav(`/order/${r.order_number}?new=1`)
+      nav(`/order/${r.order_number}?new=1${payFirst && proofSaved ? '&paid=' + q.advance_due : ''}`)
     } catch (e) {
       const msg = cleanError(e)
       toast(msg, true)
@@ -284,7 +315,7 @@ export default function Checkout() {
             <p className="small muted" style={{ marginTop: 10 }}>
               {f.payment_method === 'cash' ? 'The baker will confirm your order before preparing it. Cash is recorded when you pay.'
                 : payFirst ? `Next, you’ll pay the ${inr(q.advance_due)} advance by UPI. Your order is placed right after you pay.`
-                : `Pay the ${s.advance_mode === 'fixed' ? inr(s.advance_value) : (s.advance_value ?? 50) + '%'} advance after placing the order.`}
+                : `Pay the advance${q?.advance_due ? ' of ' + inr(q.advance_due) : ''} after placing the order.`}
               {cashBalanceOk && f.payment_method !== 'cash' && ` The balance can be paid in cash or UPI ${f.fulfilment === 'pickup' ? 'at pickup' : 'before dispatch'}.`}
             </p>
             {isCustom && <div className="notice warn small"><Icon name="sparkle" size={18} /> Your cart has a custom design. Please wait for the baker’s quote before paying the advance.</div>}
@@ -299,20 +330,39 @@ export default function Checkout() {
             <section className="card pay-now" id="pay-now">
               <div className="row between" style={{ alignItems: 'baseline' }}>
                 <div className="card-title">5 · Pay the advance: {inr(q.advance_due)}</div>
-                <button type="button" className="link-btn small" onClick={() => setPayStep(false)}>Edit order</button>
+                <button type="button" className="link-btn small" onClick={() => setPayStep(false)} disabled={busy}>Edit order</button>
               </div>
-              <p className="small muted" style={{ marginTop: 0 }}>Scan or tap to pay. Your order and Order ID are created as soon as you confirm below.</p>
-              <UpiPayBox amount={q.advance_due} note={`Pastel Treats advance - ${f.name.trim()}`.slice(0, 50)} />
+              <ol className="pay-steps">
+                <li><b className="n">1</b><span>Tap your UPI app below (or scan the QR) and pay <b>{inr(q.advance_due)}</b>.</span></li>
+                <li><b className="n">2</b><span>Take a <b>screenshot</b> of the “Payment successful” screen.</span></li>
+                <li><b className="n">3</b><span>Come back here and upload it — your order is placed instantly and you get your Order ID.</span></li>
+              </ol>
+              {back && paying && !busy && (
+                <div className="welcome-back" style={{ marginBottom: 12 }}>👋 <b>Welcome back!</b> If your payment went through, upload the screenshot below to place your order.</div>
+              )}
+              {!back && <UpiPayBox amount={q.advance_due} note={`Pastel Treats ${payRef}`} onOpen={leftToPay} />}
+              {back && (
+                <details className="pay-help">
+                  <summary className="small">Haven’t paid yet? Show the payment options again</summary>
+                  <div style={{ marginTop: 10 }}><UpiPayBox amount={q.advance_due} note={`Pastel Treats ${payRef}`} onOpen={leftToPay} /></div>
+                </details>
+              )}
               <hr className="soft" />
               <div id="pay-proof" className="stack">
-                <b className="small">After paying, tell us:</b>
-                <Field label="UPI transaction ID / UTR" hint="12 digits, from your UPI app"><input className="input" value={utr} onChange={(e) => setUtr(e.target.value)} inputMode="numeric" /></Field>
-                <label className="dropzone small">
-                  <input type="file" accept={ACCEPT_IMG} hidden onChange={(e) => setProof(e.target.files[0] || null)} />
-                  <Icon name="upload" size={18} /> {proof ? proof.name : 'Or attach the payment screenshot'}
+                <label className={'proof-drop' + (back ? ' hot' : '')}>
+                  <input type="file" accept={ACCEPT_IMG} hidden disabled={busy || ordersClosed(s)} onChange={(e) => {
+                    const file = e.target.files[0]; e.target.value = ''
+                    if (!file) return
+                    if (!file.type.startsWith('image/')) return toast('Please choose the screenshot image', true)
+                    setProof(file); setProofPrev(URL.createObjectURL(file))
+                    submit(file) // place the order straight away
+                  }} />
+                  {proofPrev ? <img src={proofPrev} alt="Your payment screenshot" className="proof-prev" /> : <span className="big" aria-hidden="true">📸</span>}
+                  <b>{busy ? 'Placing your order…' : proofPrev ? 'Screenshot added — tap to change' : 'Upload payment screenshot'}</b>
+                  <span className="tiny muted">{busy ? 'Please wait a moment and don’t close this page.' : 'Your order is placed as soon as you choose it'}</span>
                 </label>
-                <button className="btn btn-primary btn-block" disabled={busy || s.orders_paused} onClick={submit}>{busy ? 'Placing your order…' : 'I’ve paid — place my order'}</button>
-                <p className="tiny muted" style={{ margin: 0 }}>The baker checks the payment in her UPI app before confirming your order.</p>
+                {proof && !busy && <button className="btn btn-primary btn-block" disabled={ordersClosed(s)} onClick={() => submit()}>Place my order</button>}
+                <p className="tiny muted" style={{ margin: 0 }}>Payment note: <b>{payRef}</b> · The baker matches your screenshot with her UPI app and confirms your order. Please don’t pay twice.</p>
               </div>
             </section>
           )}
@@ -324,7 +374,7 @@ export default function Checkout() {
             <div className="card-title">Order summary</div>
             {q.items?.map((i, idx) => (
               <div className="line-item" key={idx}>
-                <div className="th"><ProductImage product={data.products.find((p) => p.id === i.product_id)} /></div>
+                <div className="th"><ProductImage product={data.products.find((p) => p.id === i.product_id)} thumb /></div>
                 <div className="grow">
                   <div className="row between"><b className="small">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</b><b className="small">{inr(i.line_total)}</b></div>
                   <div className="tiny muted">{itemSummary(i)}</div>
@@ -349,10 +399,10 @@ export default function Checkout() {
                 {isCustom && <div className="tiny" style={{ color: 'var(--rose-deep)' }}>Custom-design price is an estimate until the baker approves it.</div>}
               </div>
             )}
-            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={busy || !!q.err || s.orders_paused} onClick={submit}>
-              {busy ? 'Placing your order…' : payFirst ? (payStep ? 'I’ve paid — place my order' : 'Continue to payment') : isCustom || f.payment_method === 'cash' ? 'Send order request' : 'Place order & pay advance'}
+            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={busy || !!q.err || ordersClosed(s)} onClick={() => submit()}>
+              {busy ? 'Placing your order…' : payFirst ? (payStep ? (proof ? 'Place my order' : 'Upload screenshot to place order') : 'Continue to payment') : isCustom || f.payment_method === 'cash' ? 'Send order request' : 'Place order & pay advance'}
             </button>
-            {s.orders_paused && <p className="err-text center">{s.orders_paused_message || 'We are not taking new orders right now.'}</p>}
+            {ordersClosed(s) && <p className="err-text center">{closedMessage(s)}</p>}
             <p className="tiny muted center" style={{ marginTop: 8 }}>Prices are re-checked by the bakery when you submit{isDemo ? ' · demo mode' : ''}.</p>
           </div>
         </aside>

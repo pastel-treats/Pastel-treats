@@ -1,3 +1,4 @@
+import { calcAdvance } from '../lib/pricing.js'
 import React, { useState } from 'react'
 import { useAdmin, PageHead } from './AdminApp.jsx'
 import { SimpleTable } from './MenuAdmin.jsx'
@@ -121,7 +122,17 @@ export default function Settings() {
             <Field label="Advance type"><select className="input" value={s.advance_mode} onChange={set('advance_mode')}><option value="percent">Percentage of total</option><option value="fixed">Fixed amount</option></select></Field>
             <Field label={s.advance_mode === 'fixed' ? 'Advance amount ₹' : 'Advance %'}><input className="input" type="number" value={s.advance_value} onChange={set('advance_value')} /></Field>
           </div>
-          <p className="tiny muted">Example: on a {inr(2000)} order the advance is {inr(s.advance_mode === 'fixed' ? Math.min(2000, s.advance_value) : Math.ceil(2000 * s.advance_value / 100))}.</p>
+          <div className="tier-box stack">
+            <Switch checked={!!s.advance_tier_enabled} onChange={set('advance_tier_enabled')} label="Different advance for bigger orders" />
+            {s.advance_tier_enabled && <>
+              <Field label="For orders above ₹"><input className="input" type="number" min={0} value={s.advance_tier_above ?? 1000} onChange={set('advance_tier_above')} /></Field>
+              <div className="grid-2">
+                <Field label="Advance type"><select className="input" value={s.advance_tier_mode || 'percent'} onChange={set('advance_tier_mode')}><option value="percent">Percentage of total</option><option value="fixed">Fixed amount</option></select></Field>
+                <Field label={(s.advance_tier_mode || 'percent') === 'fixed' ? 'Advance amount ₹' : 'Advance %'}><input className="input" type="number" min={0} value={s.advance_tier_value ?? 50} onChange={set('advance_tier_value')} /></Field>
+              </div>
+            </>}
+          </div>
+          <p className="tiny muted">Examples: {[500, 1000, 1500, 3000].map((t) => `${inr(t)} order → ${inr(calcAdvance(t, { ...s, advance_value: +s.advance_value, advance_tier_above: +(s.advance_tier_above ?? 1000), advance_tier_value: +(s.advance_tier_value ?? 50) }))} advance`).join(' · ')}</p>
           <div className="grid-2">{T('upi_id', 'UPI ID', 'e.g. pasteltreats@okaxis')}{T('upi_name', 'Payee name shown in UPI apps')}</div>
           <div className="row wrap">
             {s.upi_qr_url && <img src={s.upi_qr_url} alt="UPI QR" style={{ width: 120, borderRadius: 12 }} />}

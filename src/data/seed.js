@@ -41,6 +41,10 @@ export const SEED_SETTINGS = {
   courier_note: 'Brownies, blondies, cookie boxes and ragi puffs can be sent by courier. Courier charges are extra — we confirm them before you pay.',
   advance_mode: 'percent', // 'percent' | 'fixed'
   advance_value: 50,
+  advance_tier_enabled: false, // orders above advance_tier_above use their own advance rule
+  advance_tier_above: 1000,
+  advance_tier_mode: 'percent',
+  advance_tier_value: 50,
   upi_id: '',
   upi_name: 'Pastel Treats',
   upi_qr_url: '',

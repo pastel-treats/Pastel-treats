@@ -11,7 +11,7 @@ export default function ProductCard({ p }) {
   return (
     <Link to={`/cake/${p.id}`} className="pcard fade-in">
       <div className="ph">
-        <ProductImage product={p} />
+        <ProductImage product={p} thumb />
         <div className="tags">
           {!p.is_available && <Badge tone="grey">Sold out</Badge>}
           {eggless && <Badge tone="lime">Eggless option</Badge>}

@@ -109,8 +109,19 @@ export function createLiveApi(url, key) {
       return data?.signedUrl || null
     },
     async uploadProductImage(file) {
-      const path = `products/${crypto.randomUUID()}.${(file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')}`
-      must(await sb.storage.from('product-images').upload(path, file, { contentType: file.type }))
+      const ext = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+      const path = `products/${crypto.randomUUID()}.${ext}`
+      // file names never change, so browsers & the CDN may keep photos for a year (less data used, faster pages)
+      must(await sb.storage.from('product-images').upload(path, file, { contentType: file.type, cacheControl: '31536000' }))
+      // small copy for menu cards (about 10× smaller download)
+      try {
+        const bmp = await createImageBitmap(file)
+        const k = Math.min(1, 640 / Math.max(bmp.width, bmp.height))
+        const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k)
+        c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+        const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8))
+        if (blob) await sb.storage.from('product-images').upload(path + '.thumb.jpg', blob, { contentType: 'image/jpeg', cacheControl: '31536000' })
+      } catch { /* the full photo is used if the small copy is missing */ }
       return sb.storage.from('product-images').getPublicUrl(path).data.publicUrl
     },
   }

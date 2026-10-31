@@ -16,12 +16,13 @@ function Steps({ items }) {
 }
 
 const IOS = [<>Open this page in <b>Safari</b> (not inside WhatsApp or Instagram).</>, <>Tap the <b>Share</b> button {shareIcon} at the bottom of the screen.</>, <>Scroll down and tap <b>Add to Home Screen</b>.</>, <>Tap <b>Add</b>. The Pastel Treats icon appears on your home screen.</>]
-const ANDROID = [<>Open this page in <b>Chrome</b> (not inside WhatsApp or Instagram).</>, <>Tap the menu {dots} at the top right.</>, <>Tap <b>Install app</b> (or <b>Add to Home screen</b>).</>, <>Tap <b>Install</b>. The Pastel Treats icon appears with your other apps.</>]
+const ANDROID = [<>Open this page in <b>Google Chrome</b> — not Samsung Internet, and not inside WhatsApp or Instagram.</>, <>Tap the menu {dots} at the top right.</>, <>Tap <b>Install app</b> (or <b>Add to Home screen</b>).</>, <>Tap <b>Install</b>. The Pastel Treats icon appears with your other apps.</>]
 
 export default function GetApp() {
   const ins = useInstall()
   const [qr, setQr] = useState('')
   const [tab, setTab] = useState(ins.platform.startsWith('ios') ? 'ios' : 'android')
+  const android = ins.platform.startsWith('android')
   const url = typeof location !== 'undefined' ? location.href.split('#')[0] : ''
   useEffect(() => { if (ins.platform === 'desktop') QRCode.toDataURL(url, { margin: 1, width: 220, color: { dark: '#3b2a2f' } }).then(setQr).catch(() => {}) }, [url, ins.platform])
 
@@ -43,17 +44,30 @@ export default function GetApp() {
           {ins.canPrompt && (
             <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} onClick={ins.prompt}><Icon name="download" size={18} /> Install the app</button>
           )}
-          {!ins.canPrompt && ins.platform !== 'desktop' && (
+          {ins.platform === 'android-other' && !inAppBrowser() && (
             <div className="notice warn" style={{ marginTop: 16 }}>
               <Icon name="sparkle" size={20} />
               <div>
-                <b>{inAppBrowser() ? 'You opened this inside another app.' : 'Opened this from WhatsApp or Instagram?'}</b> Apps can’t be installed from there. First open this page in {ins.platform === 'android' ? <b>Chrome</b> : <b>Safari</b>}:
-                {ins.platform === 'android'
+                <b>Please install from Google Chrome.</b> This browser (for example Samsung Internet) packs the app in a way Google Play Protect warns about. In Chrome it installs safely, with no warning.
+                <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+                  <a className="btn btn-primary btn-sm" href={chromeIntent()}>Open in Chrome</a>
+                  <button className="btn btn-white btn-sm" onClick={() => { navigator.clipboard?.writeText(location.origin + '/#/app').then(() => alert('Link copied — paste it in Chrome')).catch(() => {}) }}><Icon name="copy" size={16} /> Copy link</button>
+                </div>
+                <div className="tiny muted" style={{ marginTop: 8 }}>Already saw “Unsafe app blocked”? Tap <b>OK</b>, then install from Chrome. Our app is a safe web app — it needs no permissions and can’t read anything on your phone.</div>
+              </div>
+            </div>
+          )}
+          {!ins.canPrompt && (ins.platform === 'android' || ins.platform.startsWith('ios') || inAppBrowser()) && ins.platform !== 'ios-other' && (
+            <div className="notice warn" style={{ marginTop: 16 }}>
+              <Icon name="sparkle" size={20} />
+              <div>
+                <b>{inAppBrowser() ? 'You opened this inside another app.' : 'Opened this from WhatsApp or Instagram?'}</b> Apps can’t be installed from there. First open this page in {android ? <b>Chrome</b> : <b>Safari</b>}:
+                {android
                   ? <> tap <b>⋮</b> (top right) → <b>Open in Chrome</b>, or use the button below.</>
                   : <> tap the <b>Safari / compass icon</b> at the bottom, or copy the link and paste it in Safari.</>}
                 <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
-                  {ins.platform === 'android' && <a className="btn btn-primary btn-sm" href={chromeIntent()}>Open in Chrome</a>}
-                  <button className="btn btn-white btn-sm" onClick={() => { navigator.clipboard?.writeText(location.origin + '/#/app').then(() => alert('Link copied — paste it in ' + (ins.platform === 'android' ? 'Chrome' : 'Safari'))).catch(() => {}) }}><Icon name="copy" size={16} /> Copy link</button>
+                  {android && <a className="btn btn-primary btn-sm" href={chromeIntent()}>Open in Chrome</a>}
+                  <button className="btn btn-white btn-sm" onClick={() => { navigator.clipboard?.writeText(location.origin + '/#/app').then(() => alert('Link copied — paste it in ' + (android ? 'Chrome' : 'Safari'))).catch(() => {}) }}><Icon name="copy" size={16} /> Copy link</button>
                 </div>
               </div>
             </div>

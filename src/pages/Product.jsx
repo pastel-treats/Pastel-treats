@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useStore } from '../store.jsx'
 import { api } from '../api/index.js'
 import { priceItem } from '../lib/pricing.js'
 import { inr, cleanError, leadLabel } from '../lib/format.js'
-import { Icon, ProductImage, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
+import { Icon, ProductImage, thumbUrl, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 
 // Main product photo: swipe left/right (touch or mouse drag), arrow buttons and keyboard arrows.
@@ -75,6 +75,7 @@ export default function Product() {
     try { return { line: priceItem(p, sel, data.addons) } } catch (e) { return { err: cleanError(e) } }
   }, [p, sel, data.addons])
 
+  useEffect(() => { if (p?.name) document.title = `${p.name.trim()} · Pastel Treats` }, [p?.name])
   if (!p || !p.is_active) return <Empty title="This treat isn’t on the menu right now"><Link to="/menu" className="btn btn-soft">Back to menu</Link></Empty>
   const addons = data.addons.filter((a) => a.active !== false)
   const toggleAddon = (a) => setSel((s) => {
@@ -129,7 +130,7 @@ export default function Product() {
           </Swipe>
           {p.images?.length > 1 && (
             <div className="thumbs">{p.images.map((src, i) => <button key={src} className={i === img ? 'on' : ''} onClick={() => setImg(i)} aria-label={`Photo ${i + 1}`}
-              ref={(el) => { if (el && i === img) { const row = el.parentElement; const x = el.offsetLeft - row.clientWidth / 2 + el.clientWidth / 2; row.scrollTo({ left: Math.max(0, x), behavior: 'smooth' }) } }}><img src={src} alt="" loading="lazy" /></button>)}</div>
+              ref={(el) => { if (el && i === img) { const row = el.parentElement; const x = el.offsetLeft - row.clientWidth / 2 + el.clientWidth / 2; row.scrollTo({ left: Math.max(0, x), behavior: 'smooth' }) } }}><img src={thumbUrl(src)} alt="" loading="lazy" onError={(e) => { if (e.currentTarget.src !== src) e.currentTarget.src = src }} /></button>)}</div>
           )}
         </div>
         <div>

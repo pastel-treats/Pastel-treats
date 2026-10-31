@@ -13,12 +13,19 @@ import GetApp from './pages/GetApp.jsx'
 import OrderLink from './pages/OrderLink.jsx'
 import { Spinner, Empty } from './components/ui.jsx'
 import { useStore } from './store.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 const Admin = lazy(() => import('./admin/AdminApp.jsx'))
 
+const TITLES = [[/^\/$/, 'Pastel Treats — Cakes & Desserts in Dindigul'], [/^\/menu/, 'Menu'], [/^\/cart/, 'Your cart'], [/^\/checkout/, 'Checkout'],
+  [/^\/(order|o)\//, 'Your order'], [/^\/track/, 'My orders'], [/^\/contact/, 'Contact & location'], [/^\/policies/, 'Ordering & policies'], [/^\/app/, 'Get the app'], [/^\/admin/, 'Baker’s dashboard']]
 function ScrollTop() {
   const { pathname } = useLocation()
-  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  useEffect(() => {
+    window.scrollTo(0, 0)
+    const t = TITLES.find(([re]) => re.test(pathname))?.[1]
+    if (t && !pathname.startsWith('/cake/')) document.title = t.startsWith('Pastel Treats') ? t : `${t} · Pastel Treats`
+  }, [pathname])
   return null
 }
 
@@ -27,15 +34,17 @@ export default function App() {
   const { pathname } = useLocation()
   if (pathname.startsWith('/admin'))
     return (
-      <Suspense fallback={<Spinner />}>
-        <ScrollTop />
-        <Routes><Route path="/admin/*" element={<Admin />} /></Routes>
-      </Suspense>
+      <ErrorBoundary resetKey={pathname}>
+        <Suspense fallback={<Spinner />}>
+          <ScrollTop />
+          <Routes><Route path="/admin/*" element={<Admin />} /></Routes>
+        </Suspense>
+      </ErrorBoundary>
     )
-  if (error) return <Empty title="We couldn’t load the menu">Please check your connection. <button className="btn btn-soft btn-sm" onClick={reload}>Try again</button></Empty>
+  if (error && !data) return <Empty title="We couldn’t load the menu">Please check your connection. <button className="btn btn-soft btn-sm" onClick={reload}>Try again</button></Empty>
   if (!data) return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--mint)' }}><img src="logo.svg" alt="Pastel Treats" style={{ width: 240 }} /></div>
   return (
-    <>
+    <ErrorBoundary resetKey={pathname} whatsapp>
       <ScrollTop />
       <Routes>
         <Route element={<Layout />}>
@@ -55,6 +64,6 @@ export default function App() {
           <Route path="*" element={<Empty title="Page not found">That page has been eaten. <a href="#/">Go home</a></Empty>} />
         </Route>
       </Routes>
-    </>
+    </ErrorBoundary>
   )
 }

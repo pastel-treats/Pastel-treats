@@ -223,15 +223,17 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   ok('sign-up allowed only for pasteltreatsdgl@gmail.com', /closed/.test(bad || '') && good, bad)
 }
 
-// flood protection: a 4th order from the same mobile within an hour is refused
+// flood protection: a 6th order from the same mobile within an hour is refused (cancelled ones don't count)
 {
   const flood = { ...base, phone: '91234 56780', name: 'Spammer' }
   const msgs = []
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     const r = await err(() => asAnon('select place_order($1) r', [{ ...flood, idempotency_key: 'flood-' + i, date: openDay(4 + i), slot_id: slots[2].id }]))
     msgs.push(r)
   }
-  ok('max 3 orders per mobile per hour', msgs.slice(0, 3).every((m) => m === null || !/RATE_LIMIT/.test(m)) && /RATE_LIMIT/.test(msgs[3] || ''), msgs[3])
+  await db.query(`update orders set status = 'cancelled' where phone = '+919123456780' and idempotency_key = 'flood-0'`)
+  const again = await err(() => asAnon('select place_order($1) r', [{ ...flood, idempotency_key: 'flood-x', date: openDay(10), slot_id: slots[2].id }]))
+  ok('max 5 orders per mobile per hour; cancelled ones free a place', msgs.slice(0, 5).every((m) => m === null || !/RATE_LIMIT/.test(m)) && /5 orders.*about \d+ minutes/.test(msgs[5] || '') && !/RATE_LIMIT/.test(again || ''), msgs[5])
 }
 
 // deleting a customer needs a fresh e-mail code (OTP) — not possible directly
@@ -319,6 +321,45 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   const n = (await db.query(`select count(*)::int n from products where name ilike '%hamper%'`)).rows[0].n
   const prot = (await db.query(`select description from products where name = 'Protein Brownie / Cookie'`)).rows[0].description
   ok('009 update is safe to run (twice)', e1 === null && e2 === null && n === 4 && /NO flour/.test(prot), e1 || e2)
+  const e3 = await err(() => db.exec(readFileSync('supabase/migrations/010_order_limit_close_orders.sql', 'utf8')))
+  ok('010 update runs cleanly', e3 === null, e3)
+}
+
+
+// closing orders: closed now, reopens by itself on the chosen date
+{
+  const setS = (patch) => db.query(`update settings set data = data || $1::jsonb where id = 1`, [JSON.stringify(patch)])
+  await setS({ orders_paused: true, orders_paused_message: 'Fully booked', orders_paused_until: iso(addDays(2)) })
+  const shut = await err(() => asAnon('select place_order($1) r', [{ ...base, phone: '93000 66677', idempotency_key: 'cl1', date: openDay(9), slot_id: slots[1].id }]))
+  await setS({ orders_paused_until: iso(addDays(0)) })
+  const reopened = await err(() => asAnon('select place_order($1) r', [{ ...base, phone: '93000 66677', idempotency_key: 'cl2', date: openDay(9), slot_id: slots[1].id }]))
+  await setS({ orders_paused: false, orders_paused_until: null })
+  ok('close orders works and reopens on the chosen date', /PAUSED: Fully booked/.test(shut || '') && !/PAUSED/.test(reopened || ''), [shut, reopened].join(' | '))
+}
+
+
+// bigger orders can have their own advance (e.g. above ₹1,000 → 30%)
+{
+  const setS = (patch) => db.query(`update settings set data = data || $1::jsonb where id = 1`, [JSON.stringify(patch)])
+  await setS({ advance_mode: 'percent', advance_value: 50, advance_tier_enabled: true, advance_tier_above: 1000, advance_tier_mode: 'percent', advance_tier_value: 30 })
+  const small = (await asAnon('select quote_order($1) r', [{ items: [{ product_id: chouxP.id, qty: 4 }], fulfilment: 'pickup' }])).rows[0].r
+  const big = (await asAnon('select quote_order($1) r', [{ items: [{ product_id: chouxP.id, qty: 12 }], fulfilment: 'pickup' }])).rows[0].r
+  await setS({ advance_tier_mode: 'fixed', advance_tier_value: 500 })
+  const fixed = (await asAnon('select quote_order($1) r', [{ items: [{ product_id: chouxP.id, qty: 12 }], fulfilment: 'pickup' }])).rows[0].r
+  await setS({ advance_tier_enabled: false })
+  ok('bigger-order advance rule', small.total === 400 && small.advance_due === 200 && big.total === 1200 && big.advance_due === 360 && fixed.advance_due === 500, JSON.stringify([small.advance_due, big.advance_due, fixed.advance_due]))
+}
+
+
+// payment screenshot: sent twice (retry / double tap) → recorded once; no UTR needed
+{
+  const r = (await asAnon('select place_order($1) r', [{ ...base, phone: '93000 77788', name: 'Proof Test', idempotency_key: 'pf1', date: openDay(11), slot_id: slots[3].id }])).rows[0].r
+  await asAnon('select submit_payment_proof($1, $2, $3, $4, $5)', [r.order_number, '93000 77788', 'PTAB12C', 'proof/2026-10-31/x.jpg', r.advance_due])
+  await asAnon('select submit_payment_proof($1, $2, $3, $4, $5)', [r.order_number, '93000 77788', 'PTAB12C', 'proof/2026-10-31/x.jpg', r.advance_due])
+  const n = (await db.query(`select count(*)::int n from payments p join orders o on o.id = p.order_id where o.order_number = $1`, [r.order_number])).rows[0].n
+  const noShot = await err(() => asAnon('select submit_payment_proof($1, $2, $3, $4, $5)', [r.order_number, '93000 77788', '', '', r.advance_due]))
+  const st = (await db.query(`select status from orders where order_number = $1`, [r.order_number])).rows[0].status
+  ok('payment screenshot recorded once; status moves to "advance paid — being checked"', n === 1 && /screenshot/.test(noShot || '') && st === 'payment_verification', `${n} payment(s), ${st}`)
 }
 
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')

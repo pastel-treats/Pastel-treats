@@ -20,6 +20,8 @@ import Team, { DataExport } from './Team.jsx'
 import Announcements from './Announcements.jsx'
 import Reviews from './Reviews.jsx'
 import OrderAlerts from './OrderAlerts.jsx'
+import ShopStatus from './ShopStatus.jsx'
+import { ordersClosed } from '../lib/announcements.js'
 
 const ACtx = createContext(null)
 export const useAdmin = () => useContext(ACtx)
@@ -185,15 +187,21 @@ function NotAdmin({ me, onDone }) {
   )
 }
 
+function ShopPill() {
+  const { settings } = useAdmin()
+  const closed = ordersClosed(settings)
+  return <Link to="/admin/shop" className={'shop-pill ' + (closed ? 'closed' : 'open')} title={closed ? 'Orders closed — tap to open' : 'Taking orders — tap to close'}>{closed ? '🔴 Closed' : '🟢 Open'}</Link>
+}
+
 const NAV = [
-  ['Today', [['', 'Overview', 'home'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcement board', 'megaphone'], ['orders', 'Orders', 'receipt'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
+  ['Today', [['', 'Overview', 'home'], ['shop', 'Open / close orders', 'power'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcements & pop-ups', 'megaphone'], ['orders', 'Orders', 'receipt'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
   ['Money', [['payments', 'Payments', 'wallet'], ['analytics', 'Sales analytics', 'chart']]],
   ['People', [['customers', 'Customers', 'users'], ['reviews', 'Reviews', 'star'], ['dates', 'Special dates', 'gift'], ['segments', 'Segments', 'heart']]],
   ['Shop', [['menu', 'Menu & pricing', 'cake'], ['settings', 'Business settings', 'settings'], ['data', 'Data & reports', 'download']]],
 ]
 
 function Shell() {
-  const { db, me, reload } = useAdmin()
+  const { db, me, reload, settings } = useAdmin()
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
@@ -204,6 +212,7 @@ function Shell() {
     payments: db.payments.filter((p) => p.status === 'pending').length,
     tasks: tasks.filter((t) => !t.done).length,
     reviews: (db.reviews || []).filter((r) => !r.approved).length,
+    shop: ordersClosed(settings) ? '!' : 0,
   }
   return (
     <div className="admin">
@@ -211,9 +220,10 @@ function Shell() {
         <div className="in">
           <button className="x menu-toggle" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} onClick={() => setOpen((o) => !o)} aria-label="Menu"><Icon name="menu" size={20} /></button>
           <span className="t">Pastel Treats <span className="hide-sm">· Admin</span></span>
-          {isDemo && <span className="badge t-butter">Demo</span>}
+          {isDemo && <span className="badge t-butter hide-sm">Demo</span>}
           <span className="grow" />
-          <button className="btn btn-sm" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} onClick={reload} title="Refresh">↻</button>
+          <ShopPill />
+          <button className="btn btn-sm hide-sm" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} onClick={reload} title="Refresh">↻</button>
           <Link to="/" className="btn btn-sm hide-sm" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }}>View shop</Link>
           <button className="btn btn-sm" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} onClick={async () => { await api.adminSignOut(); location.reload() }} title="Sign out"><Icon name="logout" size={18} /></button>
         </div>
@@ -225,7 +235,7 @@ function Shell() {
             <div key={g}>
               <div className="grp">{g}</div>
               {items.map(([to, label, ico]) => (
-                <NavLink key={to} to={`/admin/${to}`} end={to === ''}><Icon name={ico} size={19} />{label}{counts[to] > 0 && <span className="c">{counts[to]}</span>}</NavLink>
+                <NavLink key={to} to={`/admin/${to}`} end={to === ''}><Icon name={ico} size={19} />{label}{(counts[to] > 0 || counts[to] === '!') && <span className={'c' + (counts[to] === '!' ? ' red' : '')}>{counts[to] === '!' ? 'Closed' : counts[to]}</span>}</NavLink>
               ))}
             </div>
           ))}
@@ -235,6 +245,7 @@ function Shell() {
           <Routes>
             <Route index element={<Overview />} />
             <Route path="tasks" element={<Tasks />} />
+            <Route path="shop" element={<ShopStatus />} />
             <Route path="announcements" element={<Announcements />} />
             <Route path="orders" element={<Orders />} />
             <Route path="approvals" element={<Orders preset="approvals" />} />

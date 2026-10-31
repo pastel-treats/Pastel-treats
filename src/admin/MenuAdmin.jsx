@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import ImageEditor from './ImageEditor.jsx'
 import { useAdmin, PageHead } from './AdminApp.jsx'
 import { api } from '../api/index.js'
 import { inr, cleanError } from '../lib/format.js'
@@ -31,10 +32,27 @@ function ProductEditor({ product, onClose }) {
     occasions: [], lead_time_hours: null, max_per_day: null, max_qty: 10, is_available: true, is_active: true, is_featured: false, customizable: true, allow_message: true, sort: db.products.length + 1 })
   const [busy, setBusy] = useState(false)
   const set = (k) => (v) => setP((x) => ({ ...x, [k]: v }))
-  async function upload(files) {
-    setBusy(true)
-    try { for (const f of files) { const url = await api.uploadProductImage(await compressImage(f, 1400, 0.85)); setP((x) => ({ ...x, images: [...x.images, url] })) } }
-    catch (e) { toast('Upload failed: ' + cleanError(e), true) } finally { setBusy(false) }
+  // photos: every new photo opens in the editor first (crop, light, colour…), then uploads
+  const [editing, setEditing] = useState(null) // { src, index (null = new), queue: [...] }
+  function upload(files) {
+    const list = files.filter((f) => f.type.startsWith('image/') && f.type !== 'image/heic')
+    if (files.some((f) => f.type === 'image/heic')) toast('iPhone HEIC photos: please choose “Most compatible” in Camera settings, or send the photo to yourself on WhatsApp first', true)
+    if (!list.length) return
+    const [first, ...rest] = list.map((f) => URL.createObjectURL(f))
+    setEditing({ src: first, index: null, queue: rest })
+  }
+  async function savePhoto(file) {
+    const url = await api.uploadProductImage(file)
+    const { index, queue, src } = editing
+    setP((x) => ({ ...x, images: index == null ? [...x.images, url] : x.images.map((u, i) => (i === index ? url : u)) }))
+    if (src.startsWith('blob:')) URL.revokeObjectURL(src)
+    setEditing(queue?.length ? { src: queue[0], index: null, queue: queue.slice(1) } : null)
+    toast('Photo saved — press Save to update the menu')
+  }
+  function skipPhoto() {
+    const { queue, src } = editing
+    if (src.startsWith('blob:')) URL.revokeObjectURL(src)
+    setEditing(queue?.length ? { src: queue[0], index: null, queue: queue.slice(1) } : null)
   }
   async function save() {
     if (!p.name.trim()) return toast('Please add a name', true)
@@ -51,6 +69,8 @@ function ProductEditor({ product, onClose }) {
     catch (e) { toast(cleanError(e), true) } finally { setBusy(false) }
   }
   return (
+    <>
+    {editing && <ImageEditor key={editing.src} src={editing.src} onCancel={skipPhoto} onSave={async (f) => { try { await savePhoto(f) } catch (e) { toast('Upload failed: ' + cleanError(e), true); throw e } }} saveLabel={editing.index == null ? 'Save & add' : 'Save changes'} />}
     <Modal title={product ? `Edit ${product.name}` : 'New menu item'} onClose={onClose} wide>
       <div className="cards-2">
         <div className="stack">
@@ -62,13 +82,16 @@ function ProductEditor({ product, onClose }) {
           <Field label="Description"><textarea className="input" value={p.description || ''} onChange={(e) => set('description')(e.target.value)} /></Field>
           <div>
             <div className="small" style={{ fontWeight: 500, marginBottom: 6 }}>Photos (first one is the main photo)</div>
+            <div className="tiny muted" style={{ marginBottom: 6 }}>Tap + to add a photo straight from your phone — you can crop, straighten and fix the light before it’s saved. Tap ✎ Edit to fix an existing photo.</div>
             <div className="upload-prev">
               {p.images.map((src, i) => (
                 <div className="u" key={src.slice(-40) + i}><img src={src} alt="" /><button onClick={() => set('images')(p.images.filter((_, j) => j !== i))} aria-label="Remove">×</button>
-                  {i > 0 && <button style={{ left: 4, right: 'auto' }} onClick={() => set('images')([src, ...p.images.filter((_, j) => j !== i)])} title="Make main">★</button>}</div>
+                  {i > 0 && <button style={{ left: 4, right: 'auto' }} onClick={() => set('images')([src, ...p.images.filter((_, j) => j !== i)])} title="Make main">★</button>}
+                  {!/\.svg($|\?)/.test(src) && <button className="edit" onClick={() => setEditing({ src, index: i, queue: [] })} title="Edit photo">✎ Edit</button>}</div>
               ))}
               <label className="u dropzone" style={{ display: 'grid', placeItems: 'center', padding: 0 }}><input type="file" hidden multiple accept={ACCEPT_IMG} onChange={(e) => upload([...e.target.files])} /><Icon name="plus" /></label>
             </div>
+            {busy && <div className="tiny muted">Uploading…</div>}
           </div>
           <div className="grid-2">
             <Field label="Base price ₹" hint="used when there are no sizes"><input type="number" className="input" value={p.base_price} onChange={(e) => set('base_price')(e.target.value)} /></Field>
@@ -122,6 +145,7 @@ function ProductEditor({ product, onClose }) {
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </Modal>
+    </>
   )
 }
 
@@ -221,20 +245,27 @@ export default function MenuAdmin() {
       {tab === 'products' && (
         <>
           <div className="toolbar"><select className="input" value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">All categories</option>{db.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+          <div className="chips" style={{ marginBottom: 12 }}>
+            <button className={'chip' + (cat === 'all' ? ' on' : '')} onClick={() => setCat('all')}>All items</button>
+            {db.categories.filter((c) => ['seasonal', 'hampers'].includes(c.slug)).map((c) => (
+              <button key={c.id} className={'chip' + (cat === c.id ? ' on' : '')} onClick={() => setCat(c.id)}>{c.slug === 'seasonal' ? '🥭' : '🎁'} {c.name} <small>{db.products.filter((p) => p.category_id === c.id).length}</small></button>
+            ))}
+            {!db.categories.some((c) => c.slug === 'hampers') && <span className="tiny muted">Seasonal treats & Gift hampers appear here once the database update is run.</span>}
+          </div>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr><th /><th>Item</th><th>From</th><th>Cost %</th><th>On menu</th><th>Available</th><th>Featured</th><th /></tr></thead>
               <tbody>
                 {list.map((p) => (
                   <tr key={p.id}>
-                    <td style={{ width: 56 }}><div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden' }}><ProductImage product={p} /></div></td>
+                    <td style={{ width: 56 }}><div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden' }}><ProductImage product={p} thumb /></div></td>
                     <td><b>{p.name}</b><div className="tiny muted">{db.categories.find((c) => c.id === p.category_id)?.name} · {p.unit_label}{p.lead_time_hours ? ` · ${p.lead_time_hours}h notice` : ''}</div>{!p.images?.length && <Badge tone="butter">needs photo</Badge>}</td>
-                    <td>{p.unit_label === 'each' ? `${inr(p.base_price)} each` : inr(startingPrice(p))}{p.min_qty > 1 && <div className="tiny muted">min {p.min_qty}</div>}</td>
+                    <td>{p.enquiry_only ? <span className="tiny">{p.base_price ? `from ${inr(p.base_price)}` : 'Price on request'}<br /><Badge tone="sky">Message to order</Badge></span> : p.unit_label === 'each' ? `${inr(p.base_price)} each` : inr(startingPrice(p))}{p.min_qty > 1 && <div className="tiny muted">min {p.min_qty}</div>}</td>
                     <td>{p.cost_percent != null ? `${p.cost_percent}%` : <span className="tiny muted">—</span>}</td>
                     <td><Switch checked={p.is_active} onChange={(v) => quick(p, { is_active: v })} /></td>
                     <td><Switch checked={p.is_available} onChange={(v) => quick(p, { is_available: v })} /></td>
                     <td><Switch checked={p.is_featured} onChange={(v) => quick(p, { is_featured: v })} /></td>
-                    <td><button className="btn btn-soft btn-sm" onClick={() => setEdit(p)}>Edit</button></td>
+                    <td><button className="btn btn-soft btn-sm" onClick={() => setEdit(p)}>{p.images?.length ? 'Edit' : '📷 Add photo'}</button></td>
                   </tr>
                 ))}
               </tbody>

@@ -48,9 +48,16 @@ export function priceItem(p, sel, addonsList) {
   }
 }
 
+// Which advance rule applies: orders above the "bigger order" amount can have their own advance
+export function advanceRule(total, s) {
+  if (s?.advance_tier_enabled && total > (+s.advance_tier_above || 0))
+    return { mode: s.advance_tier_mode || 'percent', value: +(s.advance_tier_value ?? 50) }
+  return { mode: s?.advance_mode || 'percent', value: +(s?.advance_value ?? 50) }
+}
 export function calcAdvance(total, s) {
-  if ((s?.advance_mode || 'percent') === 'fixed') return Math.min(total, Math.round(+s.advance_value || 0))
-  return Math.ceil((total * (s?.advance_value ?? 50)) / 100)
+  const r = advanceRule(total, s)
+  if (r.mode === 'fixed') return Math.min(total, Math.round(r.value || 0))
+  return Math.min(total, Math.ceil((total * r.value) / 100))
 }
 
 export function findZone(zones, pincode) {
