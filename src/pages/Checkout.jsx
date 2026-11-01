@@ -14,6 +14,7 @@ import { DEFAULT_STATE } from '../data/places.js'
 import { Empty, Field, Icon, ProductImage, Modal, compressImage, ACCEPT_IMG } from '../components/ui.jsx'
 import UpiPayBox from '../components/UpiPayBox.jsx'
 import { checkUpiScreenshot, warmUpUpiCheck } from '../lib/upiCheck.js'
+import { track } from '../lib/visits.js'
 import { PolicyText, LocationCard } from './Info.jsx'
 
 const DRAFT = 'pt-checkout-draft'
@@ -44,6 +45,7 @@ export default function Checkout() {
   const [proofNote, setProofNote] = useState('')
   const idem = useRef(sessionStorage.getItem('pt-idem') || crypto.randomUUID())
   useEffect(() => { try { sessionStorage.setItem('pt-idem', idem.current) } catch { /* */ } }, [])
+  useEffect(() => { track('checkout', { path: '/checkout' }) }, [])
   // short payment reference shown in the customer's UPI app note, so the baker can match the payment
   const payRef = 'PT' + idem.current.replace(/-/g, '').slice(0, 5).toUpperCase()
   // the customer left for GPay/PhonePe: remember it, so we can welcome them back (even if the phone reloaded this page)
@@ -180,6 +182,7 @@ export default function Checkout() {
     }
     try {
       const r = await api.placeOrder(payload)
+      track('order', { path: '/checkout' })
       rememberOrder({ number: r.order_number, phone: normalizePhone(f.phone), at: new Date().toISOString(), status: r.status, link_token: r.link_token,
         items: (q.items || []).map((i) => `${i.qty > 1 ? i.qty + ' × ' : ''}${i.name}`).join(', '), total: r.total, date: f.date, fulfilment: f.fulfilment })
       // 2) order is placed → attach the payment screenshot to it (retries if the network blips)

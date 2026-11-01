@@ -423,6 +423,41 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
     [a.enquiry_number, b2.enquiry_number, c.enquiry_number].join(', '))
 }
 
+// site traffic: anyone can log a visit, nobody but the baker can read it; summary adds up
+{
+  const r1 = await err(() => db.exec(readFileSync('supabase/migrations/012_site_traffic.sql', 'utf8')))
+  const r2 = await err(() => db.exec(readFileSync('supabase/migrations/012_site_traffic.sql', 'utf8')))
+  ok('012 traffic update runs cleanly (twice)', r1 === null && r2 === null, r1 || r2)
+  const V = (n) => 'v' + String(n).padStart(9, '0'), S = (n) => 's' + String(n).padStart(9, '0')
+  const T = (p) => asAnon('select track($1)', [p])
+  await T({ visitor: V(1), session: S(1), kind: 'view', path: '/', source: 'instagram', device: 'mobile', os: 'Android', browser: 'Instagram' })
+  await T({ visitor: V(1), session: S(1), kind: 'view', path: '/menu' })
+  await T({ visitor: V(1), session: S(1), kind: 'product', path: '/cake/' + prod.id, product_id: prod.id })
+  await T({ visitor: V(1), session: S(1), kind: 'view', path: '/cake/' + prod.id })
+  await T({ visitor: V(1), session: S(1), kind: 'cart', product_id: prod.id })
+  await T({ visitor: V(1), session: S(1), kind: 'checkout', path: '/checkout' })
+  await T({ visitor: V(1), session: S(1), kind: 'order', path: '/checkout' })
+  await T({ visitor: V(2), session: S(2), kind: 'view', path: '/', source: 'whatsapp', device: 'mobile', os: 'iOS', browser: 'Safari' })
+  await T({ visitor: V(3), session: S(3), kind: 'view', path: '/?x=1', source: 'google', device: 'desktop', os: 'Windows', browser: 'Chrome', app: true })
+  const junk = await err(() => T({ visitor: 'x', session: S(9), kind: 'view' }))
+  const bad = await err(() => T({ visitor: V(4), session: S(4), kind: 'hack', path: '/' }))
+  const weird = await err(() => T({ visitor: V(5), session: S(5), kind: 'view', product_id: 'not-a-uuid', app: 'maybe' }))
+  const stored = (await db.query('select count(*)::int n from site_events')).rows[0].n
+  const anonSees = (await asAnon('select count(*)::int n from site_events')).rows[0].n
+  const anonSum = await err(() => asAnon('select admin_traffic(7)'))
+  const outsider = await err(() => asUser('22222222-2222-2222-2222-222222222222', { email: 'someone@gmail.com' }, 'select admin_traffic(7)'))
+  const t = (await asUser(ADMIN, AC, 'select admin_traffic(7) r')).rows[0].r
+  const src = Object.fromEntries(t.sources.map((x) => [x.source, x.sessions]))
+  ok('visits are logged quietly; junk ignored without errors', junk === null && bad === null && weird === null && stored === 10, `stored=${stored}`)
+  ok('only the baker can see traffic', anonSees === 0 && /AUTH|permission denied/.test(anonSum || '') && /AUTH/.test(outsider || ''), anonSum)
+  ok('traffic summary: 4 visitors, 4 sessions, 6 page views, 1 ordering visit, sources & funnel',
+    t.totals.visitors === 4 && t.totals.sessions === 4 && t.totals.views === 6 && t.totals.order_sessions === 1 && src.instagram === 1 && src.whatsapp === 1 && src.google === 1 &&
+    t.funnel.visits === 4 && t.funnel.product === 1 && t.funnel.cart === 1 && t.funnel.order === 1 && t.products[0].name === 'Celebration Cake' && t.products[0].carts === 1 &&
+    t.pages.find((p) => p.page === '/').views === 4 && t.daily.length === 7 && t.hours.length === 24 && t.totals.app_sessions === 1 && t.totals.bounce === 3 && t.live === 4,
+    JSON.stringify(t.totals))
+  await db.query('delete from site_events')
+}
+
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')
 const failed = results.filter((r) => r[0] === 'FAIL').length
 console.log(`\n${results.length - failed}/${results.length} passed`)

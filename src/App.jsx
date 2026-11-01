@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import { track } from './lib/visits.js'
 import Layout from './components/Layout.jsx'
 import Home from './pages/Home.jsx'
 import Menu from './pages/Menu.jsx'
@@ -23,6 +24,7 @@ function ScrollTop() {
   const { pathname } = useLocation()
   useEffect(() => {
     window.scrollTo(0, 0)
+    track('view', { path: pathname })
     const t = TITLES.find(([re]) => re.test(pathname))?.[1]
     if (t && !pathname.startsWith('/cake/')) document.title = t.startsWith('Pastel Treats') ? t : `${t} · Pastel Treats`
   }, [pathname])

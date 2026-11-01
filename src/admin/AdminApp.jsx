@@ -23,6 +23,8 @@ import OrderAlerts from './OrderAlerts.jsx'
 import ShopStatus from './ShopStatus.jsx'
 import PhoneAlerts from './PhoneAlerts.jsx'
 import Enquiries from './Enquiries.jsx'
+import Traffic from './Traffic.jsx'
+import { optOutOwnerDevice } from '../lib/visits.js'
 import { ordersClosed, notYetOpen } from '../lib/announcements.js'
 
 const ACtx = createContext(null)
@@ -198,7 +200,7 @@ function ShopPill() {
 
 const NAV = [
   ['Today', [['', 'Overview', 'home'], ['shop', 'Open / close orders', 'power'], ['alerts', 'Phone alerts', 'bell'], ['tasks', 'Tasks & reminders', 'bell'], ['announcements', 'Announcements & pop-ups', 'megaphone'], ['orders', 'Orders', 'receipt'], ['enquiries', 'Hampers & enquiries', 'gift'], ['calendar', 'Calendar', 'calendar'], ['approvals', 'Custom approvals', 'sparkle']]],
-  ['Money', [['payments', 'Payments', 'wallet'], ['analytics', 'Sales analytics', 'chart']]],
+  ['Money', [['payments', 'Payments', 'wallet'], ['analytics', 'Sales analytics', 'chart'], ['traffic', 'Site traffic', 'eye']]],
   ['People', [['customers', 'Customers', 'users'], ['reviews', 'Reviews', 'star'], ['dates', 'Special dates', 'gift'], ['segments', 'Segments', 'heart']]],
   ['Shop', [['menu', 'Menu & pricing', 'cake'], ['settings', 'Business settings', 'settings'], ['data', 'Data & reports', 'download']]],
 ]
@@ -208,6 +210,7 @@ function Shell() {
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
+  useEffect(() => { optOutOwnerDevice() }, [])
   const tasks = useTasks()
   const counts = {
     orders: db.orders.filter((o) => ['submitted', 'payment_verification'].includes(o.status)).length,
@@ -251,6 +254,7 @@ function Shell() {
             <Route path="tasks" element={<Tasks />} />
             <Route path="shop" element={<ShopStatus />} />
             <Route path="enquiries" element={<Enquiries />} />
+            <Route path="traffic" element={<Traffic />} />
             <Route path="alerts" element={<PhoneAlerts />} />
             <Route path="announcements" element={<Announcements />} />
             <Route path="orders" element={<Orders />} />

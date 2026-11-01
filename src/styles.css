@@ -635,3 +635,4 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
 .cal-legend { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--ink-soft); }
 .cal-key { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
 .cal-key.full { background: #fde7dc; border: 1px solid #f2c3ad; }
+.live-pill { display: inline-flex; align-items: center; gap: 8px; background: #fff; border-radius: 999px; padding: 6px 14px; font-size: 0.85rem; box-shadow: var(--shadow); color: var(--forest); font-weight: 500; }

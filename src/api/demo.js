@@ -7,6 +7,7 @@ import { availability as availCalc, ACTIVE } from '../lib/schedule.js'
 import { normalizePhone } from '../lib/contact.js'
 import { todayISO, addDaysISO } from '../lib/dates.js'
 import { ordersClosed, closedMessage } from '../lib/announcements.js'
+import { trafficSummary, demoTraffic } from '../lib/trafficCalc.js'
 
 const KEY = 'pt-demo-db-v11'
 const SESSION = 'pt-demo-session'
@@ -302,6 +303,19 @@ export function createDemoApi() {
       const o = db.orders.find((x) => x.access_token && x.access_token === String(token || '').trim())
       if (!o) err('NOT_FOUND: this order link is not valid')
       return clone({ ...view(db, o), phone: o.phone })
+    },
+    async track(p) {
+      const db = load()
+      if (!db.site_events) db.site_events = demoTraffic(db.products)
+      db.site_events.push({ ...p, at: nowISO() })
+      if (db.site_events.length > 6000) db.site_events.splice(0, db.site_events.length - 6000)
+      save()
+    },
+    async traffic(days) {
+      await sleep(200)
+      const db = load()
+      if (!db.site_events) { db.site_events = demoTraffic(db.products); save() }
+      return clone(trafficSummary(db.site_events, days, db))
     },
     async submitEnquiry(p) {
       await sleep(300)

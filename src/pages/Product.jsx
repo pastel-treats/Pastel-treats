@@ -5,6 +5,7 @@ import { api } from '../api/index.js'
 import { priceItem } from '../lib/pricing.js'
 import { inr, cleanError, leadLabel } from '../lib/format.js'
 import EnquiryForm from '../components/EnquiryForm.jsx'
+import { track } from '../lib/visits.js'
 import { Icon, ProductImage, thumbUrl, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
 
@@ -78,6 +79,7 @@ export default function Product() {
   }, [p, sel, data.addons])
 
   useEffect(() => { if (p?.name) document.title = `${p.name.trim()} · Pastel Treats` }, [p?.name])
+  useEffect(() => { if (p?.id) track('product', { path: '/cake/' + p.id, productId: p.id }) }, [p?.id])
   if (!p || !p.is_active) return <Empty title="This treat isn’t on the menu right now"><Link to="/menu" className="btn btn-soft">Back to menu</Link></Empty>
   const addons = data.addons.filter((a) => a.active !== false)
   const toggleAddon = (a) => setSel((s) => {
@@ -106,7 +108,7 @@ export default function Product() {
   function add(goCheckout) {
     if (priced.err) return toast(priced.err, true)
     if (sel.custom_request && !sel.custom_description?.trim() && !sel.reference_images.length) return toast('Please describe your custom design or attach a reference picture', true)
-    if (editing) { updateLine(editing.key, sel); toast('Cart updated') } else { addToCart(sel); toast(`${p.name} added to your cart`) }
+    if (editing) { updateLine(editing.key, sel); toast('Cart updated') } else { addToCart(sel); track('cart', { path: '/cake/' + p.id, productId: p.id }); toast(`${p.name} added to your cart`) }
     nav(goCheckout ? '/checkout' : '/cart')
   }
 
