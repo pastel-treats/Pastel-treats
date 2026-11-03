@@ -147,6 +147,8 @@ function load() {
   if (cache) return cache
   try { cache = JSON.parse(localStorage.getItem(KEY) || 'null') } catch { cache = null }
   if (!cache) { cache = freshDb(); save() }
+  // demo copies made before the new baker introduction pick it up too
+  if (cache.settings && /^Hi, I am Vaishnavi, a certified, passionate baker/.test(cache.settings.baker_intro || '')) { cache.settings.baker_intro = SEED_SETTINGS.baker_intro; save() }
   return cache
 }
 function save() {
@@ -285,6 +287,48 @@ export function createDemoApi() {
       save()
       return { order_number: num, status, total: o.total, advance_due: o.advance_due, subtotal: o.subtotal, delivery_charge: o.delivery_charge, is_custom: isCustom, needs_delivery_approval: needsZone, duplicate: false, link_token: o.access_token }
     },
+    async adminCreateOrder(p) {
+      await sleep(300)
+      const db = load()
+      const phone = normalizePhone(p.phone), wa = normalizePhone(p.whatsapp || p.phone)
+      if (!String(p.name || '').trim()) err('INVALID: please enter the customer name')
+      if (!phone) err('INVALID: please enter a valid mobile number')
+      if (!p.date) err('INVALID: please choose the date')
+      if (!(p.items || []).length) err('INVALID: please add at least one item')
+      const items = p.items.map((i) => {
+        if (!String(i.name || '').trim()) err('INVALID: every item needs a name')
+        const qty = Math.max(+i.qty || 1, 1), lt = Math.max(+i.line_total || 0, 0)
+        return { product_id: db.products.some((x) => x.id === i.product_id) ? i.product_id : null, name: i.name.trim(), qty, unit_price: Math.round(lt / qty), line_total: lt, details: (i.details || '').trim() || null, message: (i.message || '').trim() || null, manual: true }
+      })
+      const sub = items.reduce((a, i) => a + i.line_total, 0), dch = Math.max(+p.delivery_charge || 0, 0), disc = Math.max(+p.discount || 0, 0)
+      const total = Math.max(sub + dch - disc, 0)
+      const adv = Math.min(p.advance_due !== '' && p.advance_due != null ? +p.advance_due : calcAdvance(total, db.settings), total)
+      const status = ['confirmed', 'awaiting_payment', 'submitted'].includes(p.status) ? p.status : 'confirmed'
+      let c = db.customers.find((x) => x.phone === phone)
+      if (!c) { c = { id: uid(), name: p.name.trim().toUpperCase(), phone, whatsapp: wa, email: null, marketing_consent: false, preferred_reminder: 'whatsapp', created_at: nowISO(), city: p.city || null }; db.customers.push(c) }
+      const slot = db.time_slots.find((x) => x.id === p.slot_id)
+      const label = slot?.label || p.slot_label || (p.fulfilment === 'courier' ? 'Courier dispatch' : null)
+      const yy = String(new Date().getFullYear()).slice(2)
+      db.counters = db.counters || {}
+      let num
+      do { db.counters[yy] = (db.counters[yy] || 0) + 1; num = `PT-${db.counters[yy]}-${yy}` } while (db.orders.some((x) => x.order_number === num))
+      const CH = { whatsapp: 'WhatsApp', phone: 'Phone call', instagram: 'Instagram', walk_in: 'In person', other: 'Other' }
+      const o = { id: uid(), order_number: num, customer_id: c.id, customer_name: p.name.trim().toUpperCase(), phone, whatsapp: wa, email: null, customer_city: c.city, access_token: newToken(),
+        status, payment_status: 'not_paid', payment_method: p.payment?.method === 'cash' ? 'cash' : 'upi', items, subtotal: sub, delivery_charge: dch, discount: disc, total, advance_due: adv, amount_paid: 0,
+        is_custom: false, quote_status: 'n/a', fulfilment: p.fulfilment || 'pickup', address: p.fulfilment !== 'pickup' && p.address?.line ? p.address : null, needs_delivery_approval: false,
+        requested_date: p.date, slot_id: slot?.id || null, slot_label: label, confirmed_date: status === 'confirmed' ? p.date : null, confirmed_slot_label: status === 'confirmed' ? label : null,
+        occasion: p.occasion || null, notes: (p.notes || '').slice(0, 1000), admin_notes: `[${new Date().toLocaleString('en-IN')}] Entered by baker · ${CH[p.channel] || 'Other'}`,
+        reference_images: [], channel: p.channel || 'whatsapp', admin_seen_at: nowISO(), created_at: nowISO(), updated_at: nowISO() }
+      db.orders.push(o)
+      db.order_status_history.push({ id: uid(), order_id: o.id, from_status: null, to_status: status, note: 'Order entered by baker', created_at: nowISO() })
+      if (+p.payment?.amount > 0) {
+        db.payments.push({ id: uid(), order_id: o.id, kind: 'advance', method: p.payment.method || 'upi', amount: +p.payment.amount, reference: p.payment.reference || null, status: 'verified',
+          proof_path: p.payment.proof_path || null, note: 'Recorded by baker', verified_at: nowISO(), created_at: nowISO() })
+        recalc(db, o.id)
+      }
+      save()
+      return { id: o.id, order_number: num, status: o.status, total, amount_paid: o.amount_paid, link_token: o.access_token }
+    },
     async uploadFile(kind, file) {
       // demo: keep a small data-URL copy in this browser
       return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file) })
@@ -331,7 +375,7 @@ export function createDemoApi() {
       const yy = todayISO().slice(2, 4)
       const n = (db.enquiry_counters[prefix + yy] || 0) + 1; db.enquiry_counters[prefix + yy] = n
       const num = `${prefix}-${n}-${yy}`
-      db.enquiries.push({ id: uid(), enquiry_number: num, kind, product_id: prod?.id || null, product_name: prod?.name || p.product_name, customer_name: String(p.name).trim().toUpperCase(), phone,
+      db.enquiries.push({ id: uid(), enquiry_number: num, kind, product_id: prod?.id || null, product_name: p.product_name || prod?.name, voice_path: p.voice_path || null, customer_name: String(p.name).trim().toUpperCase(), phone,
         quantity: p.quantity || null, budget: p.budget || null, needed_by: p.needed_by || null, fulfilment: p.fulfilment || null, city: p.city || null, notes: p.notes || null,
         status: 'new', quote_amount: null, amount_paid: 0, admin_notes: null, created_at: nowISO(), updated_at: nowISO() })
       save()

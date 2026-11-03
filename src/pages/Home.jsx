@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store.jsx'
 import ProductCard from '../components/ProductCard.jsx'
@@ -50,6 +50,40 @@ const OCCASIONS = [
   ['Graduation', '🎓', '#ffec9d'], ['Corporate', '💼', '#d9efe6'], ['For all occasions', '✨', '#eafeb4'],
 ]
 
+// Short, scannable points beside the baker's photo (editable in Business settings, one per line: "emoji text")
+const DEFAULT_POINTS = [['👩‍🍳', 'Certified pastry chef'], ['🍫', 'Van Houten & Callebaut chocolate'], ['🧁', 'Fresh buttercream, never whipped topping'], ['🎂', 'Baked fresh, in small batches']]
+function heroPoints(s) {
+  const lines = String(s.hero_points || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return DEFAULT_POINTS
+  return lines.slice(0, 5).map((l) => { const m = l.match(/^(\p{Extended_Pictographic}[\u200d\ufe0f\p{Extended_Pictographic}]*)\s*(.*)$/u); return m ? [m[1], m[2]] : ['✨', l] })
+}
+
+// Kitchen photos in a sideways swipe row (keeps the page short); dots + arrows on bigger screens
+function KitchenSlider() {
+  const ref = useRef(null)
+  const [i, setI] = useState(0)
+  const onScroll = () => { const el = ref.current; if (!el) return; const w = el.firstChild?.getBoundingClientRect().width || 1; setI(Math.round(el.scrollLeft / (w + 14))) }
+  const go = (n) => { const el = ref.current; const kid = el?.children[Math.max(0, Math.min(KITCHEN.length - 1, n))]; if (kid) el.scrollTo({ left: kid.offsetLeft - el.offsetLeft, behavior: 'smooth' }) }
+  return (
+    <div className="kit-slider">
+      <div className="kit-row" ref={ref} onScroll={onScroll} aria-label="Photos of our kitchen">
+        {KITCHEN.map(([img, t, d, real, tall]) => (
+          <figure key={t} className={'kit' + (real ? ' real' : '') + (tall ? ' tall' : '')}>
+            <img src={img} alt={t} loading="lazy" />
+            <figcaption><b>{t}</b><span className="small muted">{d}</span></figcaption>
+            <span className="ai-tag">{real ? 'Real photo' : 'Illustration'}</span>
+          </figure>
+        ))}
+      </div>
+      <div className="kit-nav">
+        <button type="button" className="cal-nav" onClick={() => go(i - 1)} disabled={i <= 0} aria-label="Previous photo"><Icon name="left" size={18} /></button>
+        <div className="kit-dots">{KITCHEN.map((k, n) => <button key={k[1]} type="button" className={n === i ? 'on' : ''} onClick={() => go(n)} aria-label={`Photo ${n + 1}`} />)}</div>
+        <button type="button" className="cal-nav" onClick={() => go(i + 1)} disabled={i >= KITCHEN.length - 1} aria-label="Next photo"><Icon name="right" size={18} /></button>
+      </div>
+    </div>
+  )
+}
+
 export default function Home() {
   const { data, settings: s } = useStore()
   const featured = data.products.filter((p) => p.is_active && p.is_featured && !p.enquiry_only)
@@ -66,29 +100,29 @@ export default function Home() {
     <>
       <LaunchCountdown />
       <section className="hero">
-        <div className="wrap">
-          <div className="fade-in">
-            <div className="eyebrow" style={{ color: '#2f5a49' }}>{s.brand_line || 'Premium home baker'} · Dindigul</div>
-            <h1 style={{ margin: '12px 0 16px' }}>
-              {rest.length ? <>{h1a},<br /><em>{rest.join(',').trim()}</em></> : s.hero_headline}
-            </h1>
-            <p className="lead" style={{ whiteSpace: 'pre-line' }}>{s.hero_intro}</p>
-            <div className="row wrap" style={{ marginTop: 22 }}>
-              <Link to="/menu" className="btn btn-primary">Explore our cakes</Link>
-              <Link to={custom ? `/cake/${custom.id}` : '/menu/custom-cakes'} className="btn btn-white">Create your custom cake</Link>
-              {s.whatsapp && <a className="btn btn-soft" href={waLink(s.whatsapp, 'Hi Pastel Treats! I have a question.')} target="_blank" rel="noreferrer" aria-label="Questions on WhatsApp"><WaIcon size={20} /> Questions?</a>}
+        <div className="wrap hero2">
+          <div className="eyebrow hero2-eye" style={{ color: '#2f5a49' }}>{s.brand_line || 'Premium home baker'} · Dindigul</div>
+          <div className="hero2-top fade-in">
+            <div className="hero2-text">
+              <h1>{h1a}{rest.length ? <em> {rest.join(',').trim()}</em> : null}</h1>
+              <ul className="hero-points">
+                {heroPoints(s).map(([ic, t]) => <li key={t}><span aria-hidden="true">{ic}</span>{t}</li>)}
+              </ul>
             </div>
-            <div className="hero-badges">
-              <span className="hb hb-time"><Icon name="clock" size={18} /> Order {leadLabel(s.lead_time_hours)}</span>
-              <span className="hb hb-fresh"><Icon name="heart" size={18} /> Baked fresh to order</span>
-              <span className="hb hb-ship"><Icon name="truck" size={18} /> Self pickup · courier for brownies & cookies</span>
-            </div>
+            <figure className="hero2-photo">
+              <span className="hero-blob" aria-hidden="true" />
+              <img src={s.baker_image || 'images/baker.webp'} alt={`${s.baker_name || 'The baker'} — Pastel Treats`} />
+              <figcaption>{s.baker_name && <b className="serif">{s.baker_name}</b>}<span>{s.baker_title || 'Certified pastry chef'}</span></figcaption>
+            </figure>
           </div>
-          <div className="hero-art fade-in">
-            <span className="hero-blob" aria-hidden="true" />
-            <img className="hero-baker" src={s.baker_image || 'images/baker.webp'} alt="The baker behind Pastel Treats" />
-            <div className="hero-tag">{s.baker_name && <b className="serif baker-name">{s.baker_name}</b>}<b className="serif" style={{ fontSize: '1.05rem', display: 'block' }}>{s.baker_title || 'Certified pastry chef'}</b><span className="muted tiny">Lavonne Academy of Baking Science & Pastry Arts</span></div>
-            <div className="hero-dots" aria-hidden="true">{['#ffdac1', '#bfebef', '#ffebf4', '#ffec9d'].map((c) => <span key={c} className="dot" style={{ background: c }} />)}</div>
+          <div className="row wrap hero2-cta">
+            <Link to="/menu" className="btn btn-primary">Explore our cakes</Link>
+            {s.whatsapp && <a className="btn btn-soft" href={waLink(s.whatsapp, 'Hi Pastel Treats! I have a question.')} target="_blank" rel="noreferrer" aria-label="Questions on WhatsApp"><WaIcon size={20} /> Ask</a>}
+            <Link to={custom ? `/cake/${custom.id}` : '/menu/custom-cakes'} className="btn btn-white">Create your custom cake</Link>
+          </div>
+          <div className="hero-badges">
+            <span className="hb hb-time"><Icon name="clock" size={18} /> Order {leadLabel(s.lead_time_hours)}</span>
+            <span className="hb hb-ship"><Icon name="truck" size={18} /> Pickup · courier for brownies & cookies</span>
           </div>
         </div>
       </section>
@@ -195,17 +229,9 @@ export default function Home() {
       <section className="section kitchen">
         <div className="wrap">
           <div className="eyebrow">Our kitchen</div>
-          <h2>Baked with the best equipment</h2>
-          <p className="muted" style={{ margin: '6px 0 18px', maxWidth: 640 }}>A professional kitchen at home — the same ovens and mixers used by top patisseries, so every bake comes out just right.</p>
-          <div className="kitchen-grid">
-            {KITCHEN.map(([img, t, d, real, tall]) => (
-              <figure key={t} className={'kit' + (real ? ' real' : '') + (tall ? ' tall' : '')}>
-                <img src={img} alt={t} loading="lazy" />
-                <figcaption><b>{t}</b><span className="small muted">{d}</span></figcaption>
-                <span className="ai-tag">{real ? 'Real photo' : 'Illustration'}</span>
-              </figure>
-            ))}
-          </div>
+          <h2>Pro equipment, home kitchen</h2>
+          <p className="muted" style={{ margin: '6px 0 16px' }}>The same oven and mixers top patisseries use. <span className="kit-hint">Swipe →</span></p>
+          <KitchenSlider />
         </div>
       </section>
 

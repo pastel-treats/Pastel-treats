@@ -458,6 +458,62 @@ ok('rate limit on lookups', /RATE_LIMIT/.test(rl || ''))
   await db.query('delete from site_events')
 }
 
+// orders entered by the baker + repeat alerts for unopened online orders
+{
+  const r1 = await err(() => db.exec(readFileSync('supabase/migrations/013_baker_orders_alerts.sql', 'utf8')))
+  const r2 = await err(() => db.exec(readFileSync('supabase/migrations/013_baker_orders_alerts.sql', 'utf8')))
+  ok('013 update runs cleanly (twice)', r1 === null && r2 === null, r1 || r2)
+  const P = { name: 'lakshmi n', phone: '95000 22233', channel: 'whatsapp', fulfilment: 'pickup', date: openDay(2), slot_label: '5:00 – 7:00 PM',
+    items: [{ product_id: prod.id, name: 'Celebration Cake', qty: 1, line_total: 1600, details: '1 kg · Chocolate truffle', message: 'Happy Birthday Amma' }, { name: 'Cupcakes (custom)', qty: 6, line_total: 400 }],
+    discount: 50, payment: { amount: 500, method: 'upi', reference: 'UTR123', proof_path: 'proof/2026-11-01/x.jpg' } }
+  const anon = await err(() => asAnon('select admin_create_order($1) r', [P]))
+  const outsider = await err(() => asUser('22222222-2222-2222-2222-222222222222', { email: 'someone@gmail.com' }, 'select admin_create_order($1) r', [P]))
+  const noItems = await err(() => asUser(ADMIN, AC, 'select admin_create_order($1) r', [{ ...P, items: [] }]))
+  const r = (await asUser(ADMIN, AC, 'select admin_create_order($1) r', [P])).rows[0].r
+  const o = (await db.query('select * from orders where id = $1', [r.id])).rows[0]
+  const pays = (await db.query('select * from payments where order_id = $1', [r.id])).rows
+  const cust = (await db.query('select * from customers where id = $1', [o.customer_id])).rows[0]
+  ok('baker can enter a WhatsApp order: own PT number, confirmed for the date, payment recorded',
+    /AUTH|permission denied/.test(anon || '') && /AUTH/.test(outsider || '') && /at least one item/.test(noItems || '') &&
+    /^PT-\d+-\d\d$/.test(r.order_number) && o.status === 'confirmed' && o.total === 1950 && o.amount_paid === 500 && o.channel === 'whatsapp' &&
+    o.confirmed_date && o.admin_seen_at && pays.length === 1 && pays[0].status === 'verified' && pays[0].proof_path === 'proof/2026-11-01/x.jpg' &&
+    cust.name === 'LAKSHMI N' && o.items[0].details === '1 kg · Chocolate truffle' && o.items[1].unit_price === 67,
+    `${r.order_number} ${o.status} total=${o.total} paid=${o.amount_paid} ${anon}`)
+  // an online order nobody has opened rings again every 3 minutes, at most 3 times; opening it stops the reminders
+  const on = (await db.query(`select id from orders where channel = 'online' order by created_at desc limit 1`)).rows[0]
+  await db.query(`update orders set status = 'awaiting_payment', admin_seen_at = null, alert_reminders = 0, last_alert_at = null, created_at = now() - interval '4 minutes' where id = $1`, [on.id])
+  const n1 = (await db.query('select remind_unseen_orders() n')).rows[0].n
+  const n2 = (await db.query('select remind_unseen_orders() n')).rows[0].n
+  await db.query(`update orders set last_alert_at = now() - interval '4 minutes' where id = $1`, [on.id])
+  const n3 = (await db.query('select remind_unseen_orders() n')).rows[0].n
+  await db.query(`update orders set last_alert_at = now() - interval '4 minutes', admin_seen_at = now() where id = $1`, [on.id])
+  const n4 = (await db.query('select remind_unseen_orders() n')).rows[0].n
+  const baker = (await db.query(`select count(*)::int n from orders where channel <> 'online' and alert_reminders > 0`)).rows[0].n
+  ok('unopened online orders ring again every 3 min until opened', n1 >= 1 && n2 === 0 && n3 >= 1 && n4 === 0 && baker === 0, [n1, n2, n3, n4].join(','))
+}
+
+// named addresses kept
+{
+  const r1 = await err(() => db.exec(readFileSync('supabase/migrations/014_named_addresses.sql', 'utf8')))
+  const r2 = await err(() => db.exec(readFileSync('supabase/migrations/014_named_addresses.sql', 'utf8')))
+  ok('014 update runs cleanly (twice)', r1 === null && r2 === null, r1 || r2)
+  const addr2 = { label: 'Amma’s house', line: '7 Temple St', area: 'RS Puram', city: 'Coimbatore', pincode: '641002' }
+  await asAnon('select place_order($1) r', [{ ...base, phone: '96000 44455', fulfilment: 'courier', items: [{ product_id: brownieP.id, qty: 1, weight: '8 pieces', flavour: 'Classic' }], date: openDay(9), slot_id: slots[3].id, idempotency_key: 'lbl1', address: addr2 }])
+  const ca = (await db.query(`select label from customer_addresses ca join customers c on c.id = ca.customer_id where c.phone = '+919600044455'`)).rows
+  ok('address name ("Amma’s house") saved with the customer address', ca.length === 1 && ca[0].label === 'Amma’s house', JSON.stringify(ca))
+}
+
+// new "meet the baker" text replaces only the old standard text
+{
+  await db.query(`update settings set data = jsonb_set(data, '{baker_intro}', to_jsonb('Hi, I am Vaishnavi, a certified, passionate baker from Lavonne.'::text)) where id = 1`)
+  const e1 = await err(() => db.exec(readFileSync('supabase/migrations/015_baker_intro.sql', 'utf8')))
+  const t1 = (await db.query(`select data->>'baker_intro' t from settings where id = 1`)).rows[0].t
+  await db.query(`update settings set data = jsonb_set(data, '{baker_intro}', to_jsonb('My own words'::text)) where id = 1`)
+  await db.exec(readFileSync('supabase/migrations/015_baker_intro.sql', 'utf8'))
+  const t2 = (await db.query(`select data->>'baker_intro' t from settings where id = 1`)).rows[0].t
+  ok('baker intro updated to "engineer turned passionate baker" (her own text is never overwritten)', e1 === null && /engineer turned passionate baker/.test(t1) && t2 === 'My own words', t1.slice(0, 50))
+}
+
 for (const r of results) console.log(r[0], r[1], r[2] ? `  (${r[2]})` : '')
 const failed = results.filter((r) => r[0] === 'FAIL').length
 console.log(`\n${results.length - failed}/${results.length} passed`)

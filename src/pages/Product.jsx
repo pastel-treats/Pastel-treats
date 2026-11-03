@@ -5,6 +5,7 @@ import { api } from '../api/index.js'
 import { priceItem } from '../lib/pricing.js'
 import { inr, cleanError, leadLabel } from '../lib/format.js'
 import EnquiryForm from '../components/EnquiryForm.jsx'
+import WaVoice from '../components/WaVoice.jsx'
 import { track } from '../lib/visits.js'
 import { Icon, ProductImage, thumbUrl, Badge, Empty, compressImage, ACCEPT_IMG, MAX_UPLOAD_MB, WaIcon } from '../components/ui.jsx'
 import { waLink, telLink, callsToday, NO_CALL_NOTE } from '../lib/contact.js'
@@ -34,7 +35,7 @@ function Swipe({ count, index, onChange, children }) {
   )
 }
 
-function Options({ n, title, list, value, onChange, hint, priceMode = 'extra', priceOf, suffix = '' }) {
+function Options({ n, title, list, value, onChange, hint, priceMode = 'extra', priceOf, suffix = '', extra }) {
   if (!list?.length) return null
   return (
     <div className="opt-block">
@@ -43,13 +44,15 @@ function Options({ n, title, list, value, onChange, hint, priceMode = 'extra', p
         {list.map((o) => {
           const label = o.label || o.name
           const price = priceOf ? priceOf(o) : +o.price || 0
+          const on = value === label && !extra?.on
           return (
-            <button type="button" key={label} role="radio" aria-checked={value === label} className={'chip' + (value === label ? ' on' : '')} onClick={() => onChange(label)}>
+            <button type="button" key={label} role="radio" aria-checked={on} className={'chip' + (on ? ' on' : '')} onClick={() => { extra?.off?.(); onChange(label) }}>
               {label}
               {priceMode === 'full' ? <small>{inr(price)}{suffix}</small> : price > 0 ? <small>+{inr(price)}</small> : null}
             </button>
           )
         })}
+        {extra && <button type="button" role="radio" aria-checked={!!extra.on} className={'chip' + (extra.on ? ' on' : '')} onClick={extra.onClick}>{extra.label}<small>{extra.sub}</small></button>}
       </div>
     </div>
   )
@@ -70,6 +73,7 @@ export default function Product() {
   } : {})
   const [img, setImg] = useState(0)
   const [enquire, setEnquire] = useState(false)
+  const [big, setBig] = useState(false) // "3 kg & above" → planned with the baker
   const [uploading, setUploading] = useState(false)
   const [showBreak, setShowBreak] = useState(false)
   const set = (k) => (v) => setSel((s) => ({ ...s, [k]: v }))
@@ -107,7 +111,7 @@ export default function Product() {
 
   function add(goCheckout) {
     if (priced.err) return toast(priced.err, true)
-    if (sel.custom_request && !sel.custom_description?.trim() && !sel.reference_images.length) return toast('Please describe your custom design or attach a reference picture', true)
+    if (sel.custom_request && !sel.custom_description?.trim() && !sel.reference_images.length) return toast('Please describe your custom design or attach a reference picture — or send a voice note on WhatsApp and write “see WhatsApp”', true)
     if (editing) { updateLine(editing.key, sel); toast('Cart updated') } else { addToCart(sel); track('cart', { path: '/cake/' + p.id, productId: p.id }); toast(`${p.name} added to your cart`) }
     nav(goCheckout ? '/checkout' : '/cart')
   }
@@ -121,6 +125,7 @@ export default function Product() {
   // brownies, blondies, cookies and tarts can be ordered as a mixed box by messaging the baker
   const canAssort = !p.enquiry_only && /brownie|blondie|cookie|tart/i.test(p.name) && !/protein/i.test(p.name)
   const optText = [sel.weight, sel.flavour].filter(Boolean).join(', ')
+  const bigMsg = `Hi Pastel Treats! I'd like a big ${p.name.trim()} — 3 kg or more.${sel.flavour ? `\nFlavour: ${sel.flavour}` : ''}\nSize / servings: \nDate needed: \nDesign idea: `
   const enquiryMsg = `Hi Pastel Treats! I'd like to order: ${p.name}${optText ? ` (${optText})` : ''}${sel.qty > 1 ? ` × ${sel.qty}` : ''}.\nPlease share the price and details.`
   const assortMsg = `Hi Pastel Treats! I'd like an ASSORTED ${p.name.replace(/\s+$/, '')}${sel.weight ? ` (${sel.weight})` : ''}${sel.qty > 1 ? `, quantity ${sel.qty}` : ''} — a mix of flavours.\nFlavours I'd love: `
 
@@ -153,7 +158,8 @@ export default function Product() {
             <>
               <Options n={(p.flavours?.length && N()) || 0} title="Choose flavour" hint="price per kg" list={p.flavours} value={sel.flavour} onChange={set('flavour')} priceMode="full" suffix="/kg" />
               <Options n={(p.weights?.length && N()) || 0} title="Choose size" list={p.weights} value={sel.weight} onChange={set('weight')} priceMode="full"
-                priceOf={(w) => Math.round(((p.flavours || []).find((f) => f.name === sel.flavour)?.price || 0) * (+w.kg || 1))} />
+                priceOf={(w) => Math.round(((p.flavours || []).find((f) => f.name === sel.flavour)?.price || 0) * (+w.kg || 1))}
+                extra={p.weights?.length ? { label: '3 kg & above', sub: 'plan with us', on: big, onClick: () => setBig(true), off: () => setBig(false) } : null} />
               <p className="tiny muted" style={{ margin: '-6px 0 8px' }}>Half kg starts at ₹800 (it’s too small a quantity to enjoy our signature taste ;) ) — {settings.whatsapp ? <a href={`https://wa.me/${settings.whatsapp}?text=${encodeURIComponent(`Hi! I'd like a half kg ${p.name}.`)}`} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>ask on WhatsApp</a> : 'ask on WhatsApp'} if you’d still like one.</p>
             </>
           ) : (
@@ -185,6 +191,9 @@ export default function Product() {
               </div>
               <label className="field" style={{ marginTop: 12 }}><span>Theme or reference description</span><input className="input" maxLength={200} value={sel.theme} onChange={(e) => set('theme')(e.target.value)} placeholder="Garden party, football, minimal gold…" /></label>
               <label className="field" style={{ marginTop: 12 }}><span>Special instructions</span><textarea className="input" maxLength={500} value={sel.instructions} onChange={(e) => set('instructions')(e.target.value)} placeholder="Less sweet, no nuts on top, extra candles…" /></label>
+              <div className="field" style={{ marginTop: 12 }}><span>Easier to say it? <em className="hint" style={{ fontStyle: 'normal' }}>· optional</em></span>
+                <WaVoice text={`Hi Pastel Treats! A voice note about the ${p.name.trim()} I'm ordering${optText ? ` (${optText})` : ''} 🎤`} />
+              </div>
             </div>
           )}
 
@@ -256,7 +265,7 @@ export default function Product() {
             </div>
           </div>
 
-          {showBreak && priced.line && (
+          {showBreak && !big && priced.line && (
             <div className="card flat breakdown fade-in" style={{ marginTop: 10 }}>
               <div className="ln"><span>{p.weights?.length ? `Base (${priced.line.weight})` : 'Base price'}</span><span>{inr(priced.line.weight_price)}</span></div>
               {priced.line.option_charges > 0 && <div className="ln"><span>Customisation (flavour, design…)</span><span>+{inr(priced.line.option_charges)}</span></div>}
@@ -267,12 +276,28 @@ export default function Product() {
             </div>
           )}
 
+          {big && (
+            <div className="big-cake fade-in">
+              <b>🎂 Cakes of 3 kg & above are planned personally with the baker</b>
+              <p className="small" style={{ margin: '6px 0 10px' }}>Message or call her with the size, flavour, tiers and design — on WhatsApp you can also send photos or a voice message — and she’ll share the price and confirm the date.</p>
+              <div className="row wrap" style={{ gap: 8 }}>
+                {settings.whatsapp && <a className="btn btn-wa btn-sm" target="_blank" rel="noreferrer" href={waLink(settings.whatsapp, bigMsg)}><WaIcon size={18} /> Message on WhatsApp</a>}
+                {settings.phone && (callsToday(settings)
+                  ? <a className="btn btn-white btn-sm" href={telLink(settings.phone)}><Icon name="phone" size={16} /> Call the baker</a>
+                  : <span className="tiny muted">{NO_CALL_NOTE}</span>)}
+              </div>
+            </div>
+          )}
+
           <div className="price-bar">
             <button className="grow" style={{ background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', padding: 0 }} onClick={() => setShowBreak((v) => !v)}>
-              <div className="tiny muted">{sel.custom_request ? 'Estimated total' : 'Total'} · <u>{showBreak ? 'hide' : 'see'} breakdown</u></div>
-              <div className="total">{p.enquiry_only ? (p.base_price ? `from ${inr(p.base_price)}` : 'Price on request') : priced.line ? inr(priced.line.line_total) : '—'}</div>
+              <div className="tiny muted">{big ? '3 kg & above' : <>{sel.custom_request ? 'Estimated total' : 'Total'} · <u>{showBreak ? 'hide' : 'see'} breakdown</u></>}</div>
+              <div className="total">{big ? 'On request' : p.enquiry_only ? (p.base_price ? `from ${inr(p.base_price)}` : 'Price on request') : priced.line ? inr(priced.line.line_total) : '—'}</div>
             </button>
-            {p.enquiry_only ? (
+            {big ? (
+              settings.whatsapp ? <a className="btn btn-wa" target="_blank" rel="noreferrer" href={waLink(settings.whatsapp, bigMsg)}><WaIcon size={18} /> WhatsApp the baker</a>
+                : <a className="btn btn-primary" href={telLink(settings.phone)}><Icon name="phone" size={16} /> Call the baker</a>
+            ) : p.enquiry_only ? (
               <button className="btn btn-primary" disabled={!p.is_available} onClick={() => setEnquire(true)}>Request a quote</button>
             ) : (
               <button className="btn btn-primary" disabled={!p.is_available || !!priced.err || uploading} onClick={() => add(false)}>
@@ -282,7 +307,7 @@ export default function Product() {
           </div>
           {priced.err && !p.enquiry_only && <p className="err-text" style={{ marginTop: 8 }}>{priced.err}</p>}
           {p.enquiry_only && settings.whatsapp && <p className="tiny muted" style={{ marginTop: 8 }}>Prefer to chat? <a href={waLink(settings.whatsapp, enquiryMsg)} target="_blank" rel="noreferrer">Message us on WhatsApp</a></p>}
-          {enquire && <EnquiryForm product={p} kind={cat?.slug === 'hampers' ? 'hamper' : cat?.slug === 'seasonal' ? 'seasonal' : 'other'} onClose={() => setEnquire(false)} />}
+          {enquire && <EnquiryForm product={p} kind={cat?.slug === 'hampers' ? 'hamper' : cat?.slug === 'seasonal' ? 'seasonal' : 'other'} big={enquire === 'big'} flavour={sel.flavour} onClose={() => setEnquire(false)} />}
         </div>
       </div>
     </div>

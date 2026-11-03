@@ -42,6 +42,7 @@ export function createLiveApi(url, key) {
     submitEnquiry: (p) => rpcJson('submit_enquiry', { p }),
     track: (p) => sb.rpc('track', { p }).then(() => {}, () => {}),
     traffic: (days) => rpcJson('admin_traffic', { p_days: days }),
+    adminCreateOrder: (p) => rpcJson('admin_create_order', { p }),
     submitReview: (token, rating, body) => rpcJson('submit_review', { p_token: token, p_rating: rating, p_body: body }),
     publicReviews: () => rpcJson('get_public_reviews', {}),
     submitProof: (number, phone, reference, path, amount, note) =>

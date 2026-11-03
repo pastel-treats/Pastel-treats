@@ -92,7 +92,7 @@ function Profile({ id, onClose }) {
             <b>Preferences (from orders)</b>
             <dl className="kv" style={{ marginTop: 6 }}><dt>Favourite</dt><dd>{st.favProduct || '—'}</dd><dt>Flavour</dt><dd>{st.favFlavour || '—'}</dd><dt>Size</dt><dd>{st.favSize || '—'}</dd><dt>Design</dt><dd>{st.favDesign || '—'}</dd><dt>Prefers</dt><dd>{st.prefMode || '—'}</dd></dl>
           </div>
-          {addrs.length > 0 && <div className="card flat small"><b>Saved addresses</b>{addrs.map((a) => <div key={a.id} className="list-row">{[a.line, a.area, a.city, a.pincode].filter(Boolean).join(', ')}<button className="btn btn-white btn-sm" style={{ marginLeft: 'auto' }} onClick={async () => { await api.remove('customer_addresses', a.id); reload() }}><Icon name="trash" size={14} /></button></div>)}</div>}
+          {addrs.length > 0 && <div className="card flat small"><b>Saved addresses</b>{addrs.map((a) => <div key={a.id} className="list-row"><span><b>{a.label || 'Address'}</b> · {[a.line, a.area, a.city, a.pincode].filter(Boolean).join(', ')}</span><button className="btn btn-white btn-sm" style={{ marginLeft: 'auto' }} onClick={async () => { await api.remove('customer_addresses', a.id); reload() }}><Icon name="trash" size={14} /></button></div>)}</div>}
           <button className="btn btn-danger btn-sm" onClick={() => setDeleting(true)}>Delete customer data</button>
           {deleting && <DeleteCustomer c={c} st={st} onClose={() => setDeleting(false)} onDeleted={async () => { onClose(); await reload() }} />}
         </div>

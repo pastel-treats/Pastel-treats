@@ -5,6 +5,7 @@ import { inr, cleanError } from '../lib/format.js'
 import { fmtDate, fmtDateTime } from '../lib/dates.js'
 import { waLink, telLink, prettyPhone } from '../lib/contact.js'
 import { Badge, Empty, Field, Icon, WaIcon } from '../components/ui.jsx'
+import SignedFile from '../components/SignedFile.jsx'
 
 // Hamper & seasonal enquiries ("Request a quote"), tracked separately from cake orders.
 const STATUS = {
@@ -37,6 +38,7 @@ function EnquiryCard({ e, onSaved }) {
       <div className="small">{e.customer_name} · {prettyPhone(e.phone)}{e.city ? ` · ${e.city}` : ''} · {e.fulfilment === 'courier' ? 'Courier' : 'Pickup'}</div>
       {e.needed_by && <div className="small">Needed by <b>{fmtDate(e.needed_by, { weekday: true, year: true })}</b></div>}
       {e.notes && <div className="small" style={{ background: 'var(--ivory)', borderRadius: 10, padding: '8px 10px' }}>“{e.notes}”</div>}
+      {e.voice_path && <SignedFile path={e.voice_path} label="Customer’s voice note" />}
       <div className="tiny muted">Received {fmtDateTime(e.created_at)}</div>
       <div className="row wrap" style={{ gap: 8 }}>
         <a className="btn btn-sm" style={{ background: '#25d366', color: '#fff' }} href={waLink(e.phone, `Hi ${first(e.customer_name)}, about your request ${e.enquiry_number}: `)} target="_blank" rel="noreferrer"><WaIcon size={16} /> WhatsApp</a>

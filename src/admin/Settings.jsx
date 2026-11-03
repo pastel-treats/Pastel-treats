@@ -86,7 +86,7 @@ export default function Settings() {
         </>}
         {tab === 'home' && <>
           {T('hero_headline', 'Headline', 'text after the comma is shown in italics')}
-          <Field label="Introduction"><textarea className="input" value={s.hero_intro || ''} onChange={set('hero_intro')} /></Field>
+          <Field label="Short points beside your photo" hint="one per line, start with an emoji — leave empty for the standard four"><textarea className="input" rows={4} value={s.hero_points || ''} onChange={set('hero_points')} placeholder={'👩‍🍳 Certified pastry chef\n🍫 Van Houten & Callebaut chocolate\n🧁 Fresh buttercream, never whipped topping\n🎂 Baked fresh, in small batches'} /></Field>
           {T('promo_banner', 'Promotional banner', 'leave blank to hide')}
           <div className="grid-2">{T('baker_name', 'Baker’s name', 'shown under her picture')}{T('baker_title', 'Baker’s title', 'e.g. Certified pastry chef')}</div>
           <Field label="Meet the baker — introduction"><textarea className="input" value={s.baker_intro || ''} onChange={set('baker_intro')} /></Field>

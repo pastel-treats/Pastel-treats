@@ -15,6 +15,7 @@ import { Empty, Field, Icon, ProductImage, Modal, compressImage, ACCEPT_IMG } fr
 import UpiPayBox from '../components/UpiPayBox.jsx'
 import { checkUpiScreenshot, warmUpUpiCheck } from '../lib/upiCheck.js'
 import { track } from '../lib/visits.js'
+import { getPerson, lastPhone, savePerson, removeAddress, LABELS, labelIcon, addressText } from '../lib/addressBook.js'
 import { PolicyText, LocationCard } from './Info.jsx'
 
 const DRAFT = 'pt-checkout-draft'
@@ -28,7 +29,7 @@ export default function Checkout() {
   const [f, setF] = useState(() => ({
     fulfilment: 'pickup', date: null, slotId: null, slotLabel: null, alt_date: '', alt_slot_label: '',
     name: '', phone: '', sameWa: true, whatsapp: '', email: '', state: DEFAULT_STATE, city: '',
-    address: { line: '', area: '', city: '', pincode: '', landmark: '', instructions: '' },
+    address: { label: 'Home', line: '', area: '', city: '', pincode: '', landmark: '', instructions: '' },
     occasion: '', occasion_date: '', occasion_person: '', remember_occasion: false, marketing_consent: false,
     notes: '', payment_method: 'upi', accepted_policies: false, request_out_of_zone: false,
     ...(loadDraft() || {}),
@@ -69,13 +70,30 @@ export default function Checkout() {
   }
   useEffect(() => { try { sessionStorage.setItem(DRAFT, JSON.stringify({ ...f, accepted_policies: false })) } catch { /* */ } }, [f])
 
-  // returning customer on this phone → prefill name & number (stored only on this device)
+  // returning customer on this phone → prefill details & saved addresses (kept only on this device, like Swiggy/Zomato)
+  const [person, setPerson] = useState(null)
+  const [addrSel, setAddrSel] = useState('new') // saved address id, or 'new'
+  const [otherLabel, setOtherLabel] = useState(false)
+  const [editAddr, setEditAddr] = useState(false)
+  useEffect(() => { if (errors.line || errors.pincode) setEditAddr(true) }, [errors])
+  const applyPerson = (ph, fill) => {
+    const pp = getPerson(ph)
+    setPerson(pp)
+    if (!pp) { setAddrSel('new'); return }
+    setF((x) => ({ ...x, name: x.name || pp.name || '', email: x.email || pp.email || '', state: x.city ? x.state : pp.state || x.state, city: x.city || pp.city || '' }))
+    const a = pp.addresses[0]
+    if (a && (fill || !f.address.line)) { setAddrSel(a.id); setF((x) => ({ ...x, address: { ...x.address, ...a } })) }
+  }
   useEffect(() => {
-    try {
-      const last = JSON.parse(localStorage.getItem('pt-last-details') || 'null')
-      if (last) setF((x) => ({ ...x, name: x.name || last.name || '', phone: x.phone || last.phone || '', email: x.email || last.email || '', state: x.city ? x.state : last.state || x.state, city: x.city || last.city || '' }))
-    } catch { /* private mode */ }
+    const ph = f.phone || lastPhone()
+    if (ph && !f.phone) setF((x) => ({ ...x, phone: ph }))
+    if (ph) applyPerson(ph, !f.address.line)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  const onPhone = (v) => { setF((x) => ({ ...x, phone: v })); if (normalizePhone(v) && normalizePhone(v) !== normalizePhone(f.phone)) applyPerson(v, true) }
+  const pickAddr = (a) => { setAddrSel(a.id); setOtherLabel(false); setEditAddr(false); setF((x) => ({ ...x, address: { ...x.address, ...a } })) }
+  const newAddr = () => { setAddrSel('new'); setOtherLabel(false); setEditAddr(false); setF((x) => ({ ...x, address: { label: person?.addresses.some((a) => a.label === 'Home') ? 'Work' : 'Home', line: '', area: '', city: x.city || '', pincode: '', landmark: '', instructions: '' } })) }
+  const dropAddr = (a) => { removeAddress(f.phone, a.id); const pp = getPerson(f.phone); setPerson(pp); if (addrSel === a.id) newAddr() }
 
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }))
   const setAddr = (k) => (v) => setF((x) => ({ ...x, address: { ...x.address, [k]: v } }))
@@ -195,6 +213,7 @@ export default function Checkout() {
         try { sessionStorage.removeItem(PAYKEY) } catch { /* */ }
       }
       try { localStorage.setItem('pt-last-details', JSON.stringify({ name: f.name.trim(), phone: f.phone, email: f.email, state: f.state, city: f.city.trim() })) } catch { /* */ }
+      savePerson(f.phone, { name: f.name.trim(), email: f.email, state: f.state, city: f.city.trim() }, shipping ? { ...f.address, id: addrSel !== 'new' ? addrSel : undefined } : null)
       clearCart()
       sessionStorage.removeItem(DRAFT)
       sessionStorage.removeItem('pt-idem')
@@ -285,7 +304,7 @@ export default function Checkout() {
             <div className="row between"><div className="card-title">{shipping ? '3 · Your details & address' : '3 · Your details'}</div></div>
             <div className="grid-2">
               <div data-err="name"><Field label="Full name" error={errors.name}><input className={'input' + (errors.name ? ' err' : '')} autoComplete="name" autoCapitalize="characters" style={{ textTransform: 'uppercase' }} value={f.name} onChange={(e) => set('name')(e.target.value.toUpperCase())} /></Field></div>
-              <div data-err="phone"><Field label="Mobile number" error={errors.phone}><PhoneInput invalid={!!errors.phone} value={f.phone} onChange={set('phone')} /></Field></div>
+              <div data-err="phone"><Field label="Mobile number" error={errors.phone}><PhoneInput invalid={!!errors.phone} value={f.phone} onChange={onPhone} /></Field></div>
             </div>
             <div data-err="city" style={{ marginTop: 12 }}>
               <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>{shipping ? 'Delivery state & district' : 'Where are you ordering from?'}</div>
@@ -300,7 +319,35 @@ export default function Checkout() {
               <>
                 <hr className="soft" />
                 <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{f.fulfilment === 'courier' ? '📦 Courier address' : '🚗 Delivery address'}</div>
-<div className="stack" style={{ marginTop: 6 }}>
+              {person?.addresses?.length > 0 && (
+                <div className="addr-list" style={{ marginTop: 8 }} role="radiogroup" aria-label="Saved addresses">
+                  {person.addresses.map((a) => (
+                    <div key={a.id} className="row" style={{ gap: 6, alignItems: 'stretch' }}>
+                      <button type="button" role="radio" aria-checked={addrSel === a.id} className={'addr-card' + (addrSel === a.id ? ' on' : '')} onClick={() => pickAddr(a)}>
+                        <span className="ic" aria-hidden="true">{labelIcon(a.label)}</span>
+                        <span className="grow"><span className="t">{a.label}</span><span className="d">{addressText(a)}</span></span>
+                        {addrSel === a.id && <Icon name="check" size={18} />}
+                      </button>
+                      <button type="button" className="link-btn tiny" aria-label={`Forget ${a.label} address`} onClick={() => dropAddr(a)}>×</button>
+                    </div>
+                  ))}
+                  <button type="button" className={'addr-card add' + (addrSel === 'new' ? ' on' : '')} onClick={newAddr}><Icon name="plus" size={18} /> Add a new address</button>
+                </div>
+              )}
+<div className="stack" style={{ marginTop: 10 }}>
+                {addrSel !== 'new' && !editAddr ? (
+                  <button type="button" className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setEditAddr(true)}>Edit this address</button>
+                ) : (
+                <>
+                <div className="field"><span>Save this address as</span>
+                  <div className="chips">
+                    {LABELS.map(([l, ic]) => {
+                      const on = l === 'Other' ? otherLabel || !['Home', 'Work'].includes(f.address.label) : f.address.label === l && !otherLabel
+                      return <button key={l} type="button" className={'chip' + (on ? ' on' : '')} onClick={() => { if (l === 'Other') { setOtherLabel(true); setAddr('label')('') } else { setOtherLabel(false); setAddr('label')(l) } }}>{ic} {l}</button>
+                    })}
+                  </div>
+                  {(otherLabel || !['Home', 'Work'].includes(f.address.label)) && <input className="input" style={{ marginTop: 8 }} maxLength={30} value={f.address.label} onChange={(e) => setAddr('label')(e.target.value)} placeholder="Name it — e.g. Amma’s house, Office, Hostel" />}
+                </div>
                 <div data-err="line"><Field label="House / flat, street" error={errors.line}><input className={'input' + (errors.line ? ' err' : '')} autoComplete="street-address" value={f.address.line} onChange={(e) => setAddr('line')(e.target.value)} /></Field></div>
                 <div className="grid-2">
                   <Field label="Area / locality"><input className="input" value={f.address.area} onChange={(e) => setAddr('area')(e.target.value)} /></Field>
@@ -309,6 +356,8 @@ export default function Checkout() {
                   <Field label="Landmark"><input className="input" value={f.address.landmark} onChange={(e) => setAddr('landmark')(e.target.value)} /></Field>
                 </div>
                 <Field label={f.fulfilment === 'courier' ? 'Notes for the courier' : 'Delivery instructions'} hint="optional"><input className="input" value={f.address.instructions} onChange={(e) => setAddr('instructions')(e.target.value)} placeholder="Gate code, call on arrival…" /></Field>
+                </>
+                )}
                 {zone && <div className="notice info small"><Icon name="check" size={18} /> We deliver to {zone.name}: {q.delivery_charge ? inr(q.delivery_charge) : 'free delivery'}{zone.free_above && q.delivery_charge ? ` (free above ${inr(zone.free_above)})` : ''}.</div>}
                 {outOfZone && (
                   <div className="notice warn small"><Icon name="map" size={18} /><div>Sorry, {f.address.pincode} is outside our delivery area.

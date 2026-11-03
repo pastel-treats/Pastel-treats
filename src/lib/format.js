@@ -43,7 +43,7 @@ export const cleanError = (e) => {
 }
 
 export const itemSummary = (i) =>
-  [i.weight, i.flavour, i.filling, i.frosting, i.design, i.egg].filter(Boolean).join(' · ')
+  [i.weight, i.flavour, i.filling, i.frosting, i.design, i.egg, i.details].filter(Boolean).join(' · ')
 
 export const OCCASIONS = ['Birthday', 'Anniversary', 'Baby shower', 'Wedding', 'Graduation', 'Corporate', 'Festival', 'Other']
 

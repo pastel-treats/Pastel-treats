@@ -357,6 +357,7 @@ export default function OrderView() {
             {paidNow > 0 && <div className="small" style={{ marginTop: 6 }}>{paidNow >= o.total ? <>Paid in full <b>{inr(paidNow)}</b> · nothing more to pay</> : <>Advance paid <b>{inr(paidNow)}</b> · Balance <b>{inr(paymentTotals(o).balance)}</b></>}</div>}
           </div>
           {s.whatsapp && <a className="btn btn-primary" style={{ marginTop: 12 }} href={waLink(s.whatsapp, orderMessage(o, phone || known?.phone))} target="_blank" rel="noreferrer"><WaIcon size={18} /> Send my order details on WhatsApp</a>}
+          {s.whatsapp && <p className="tiny muted" style={{ margin: '4px 0 0' }}>🎤 Want to explain your design by voice? Send a voice note in that WhatsApp chat.</p>}
           <p className="small" style={{ margin: '4px 0 0' }}>{paidNow ? 'The baker checks the payment and confirms your order on WhatsApp.' : o.status === 'awaiting_payment' ? 'Pay the advance below to secure your slot.' : 'The baker will review it and message you on WhatsApp.'}</p>
           <p className="tiny muted" style={{ margin: '6px 0 0' }}>Sending it on WhatsApp also keeps your <b>private order link</b> in the chat — tap it any time to check your order.</p>
         </div>

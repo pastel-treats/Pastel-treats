@@ -10,6 +10,7 @@ import { Icon } from '../components/ui.jsx'
 // checks for new orders every 15 s while the dashboard is open, rings until she taps it,
 // vibrates the phone, shows a phone notification and flashes the tab title.
 const POLL_MS = 15000
+const IOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent)
 const PREF = 'pt-order-alerts'
 const NEW_STATUSES = ['submitted', 'awaiting_payment', 'payment_verification']
 const getPref = () => { try { return localStorage.getItem(PREF) } catch { return null } }
@@ -119,7 +120,8 @@ export default function OrderAlerts() {
     if ('Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission() } catch { /* ignore */ } }
   }
   const disable = () => { setOn(false); setPref('off'); ringer.current.stop() }
-  const done = (id) => setQueue((q) => q.filter((o) => o.id !== id))
+  // acknowledging an order on this screen also stops the repeat phone alerts for it
+  const done = (id) => { setQueue((q) => q.filter((o) => o.id !== id)); api.update('orders', id, { admin_seen_at: new Date().toISOString() }).catch(() => {}) }
   const o = queue[0]
 
   return (
@@ -128,7 +130,7 @@ export default function OrderAlerts() {
         {on ? (
           <>
             <span className="pulse-dot" aria-hidden="true" />
-            <span className="grow small"><b>Order alerts on</b> — this page rings for every new order. For alerts with the app closed, set up <Link to="/admin/alerts">Phone alerts</Link>.</span>
+            <span className="grow small"><b>Order alerts on</b> — this page rings while it’s open.{IOS ? ' On iPhone, websites stay quiet in silent mode and can’t vibrate.' : ''} For alerts with the app closed or the phone locked, set up <Link to="/admin/alerts">Phone alerts</Link>.</span>
             <button className="btn btn-white btn-sm" onClick={() => ringer.current.test()}>Test sound</button>
             <button className="link-btn small" onClick={disable}>Turn off</button>
           </>

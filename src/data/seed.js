@@ -13,7 +13,7 @@ export const SEED_SETTINGS = {
   baker_name: 'Vaishnavi',
   baker_title: 'Certified pastry chef',
   baker_intro:
-    'Hi, I am Vaishnavi, a certified, passionate baker from Lavonne Academy of Baking Science & Pastry Arts. Every Pastel Treats order is baked by me in small batches, fresh for your celebration.',
+    'Hi, I’m Vaishnavi — an engineer turned passionate baker, trained and certified at Lavonne Academy of Baking Science & Pastry Arts. Every Pastel Treats order is baked by me, fresh and in small batches, for your celebration.',
   baker_image: 'images/baker.webp',
   promo_banner: '',
   announcements: [],

@@ -9,7 +9,9 @@ import { orderDate } from '../lib/analytics.js'
 import { cancellationTerms } from '../lib/cancellation.js'
 import { ORDER_TEMPLATES } from '../lib/templates.js'
 import { waLink, prettyPhone, telLink, downloadCSV } from '../lib/contact.js'
-import { Modal, StatusBadge, PayBadge, Badge, Icon, Field, Empty, WaIcon, Spinner } from '../components/ui.jsx'
+import { Modal, StatusBadge, PayBadge, Badge, Icon, Field, Empty, WaIcon, Spinner, compressImage, ACCEPT_IMG } from '../components/ui.jsx'
+import NewOrder from './NewOrder.jsx'
+import SignedFile, { isAudioPath } from '../components/SignedFile.jsx'
 
 const NEXT = {
   submitted: [['awaiting_payment', 'Approve & request advance'], ['confirmed', 'Confirm now']],
@@ -31,6 +33,126 @@ function SignedImg({ path, label }) {
   return <a className="u" href={url} target="_blank" rel="noreferrer" title={label}><img src={url} alt={label || 'Upload'} /></a>
 }
 
+const KIND_LABEL = { advance: 'Advance', balance: 'Balance', refund: 'Refund' }
+const METHODS = [['upi', 'UPI'], ['cash', 'Cash'], ['bank', 'Bank transfer'], ['gateway', 'Gateway'], ['other', 'Other']]
+
+// Payments on an order: verify the customer's screenshot, record one yourself (with their screenshot), fix or remove a mistake
+function PaymentsCard({ o, payments, busy, run }) {
+  const due = Math.max(o.total - o.amount_paid, 0)
+  const advLeft = Math.max(o.advance_due - o.amount_paid, 0)
+  const blank = () => ({ kind: o.amount_paid < o.advance_due ? 'advance' : 'balance', method: 'upi', amount: String(advLeft || due || ''), reference: '' })
+  const [pay, setPay] = useState(blank)
+  const [shot, setShot] = useState(null)
+  const [edit, setEdit] = useState(null) // { id, kind, method, amount, reference }
+  const [confirmToo, setConfirmToo] = useState(true)
+  useEffect(() => { setPay(blank()) }, [o.amount_paid, o.total]) // eslint-disable-line react-hooks/exhaustive-deps
+  const over = o.amount_paid - o.total
+  const waiting = payments.filter((p) => p.status === 'pending' && p.kind !== 'refund')
+  const stamp = () => new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+  const canConfirm = ['submitted', 'awaiting_payment', 'payment_verification', 'advance_received'].includes(o.status)
+
+  const record = () => {
+    const amt = +pay.amount
+    if (pay.kind !== 'refund') {
+      if (waiting.length && !confirm(`The customer already sent a payment screenshot for ${inr(waiting[0].amount)} that is waiting for you.\n\nIf this is the same payment, press Cancel and tap “Verify” on it instead.\n\nRecord a separate payment of ${inr(amt)}?`)) return
+      if (amt > due && !confirm(due === 0 ? `This order is already fully paid (${inr(o.amount_paid)} of ${inr(o.total)}).\n\nRecord another ${inr(amt)} anyway?` : `Only ${inr(due)} is left to pay on this order.\n\nRecord ${inr(amt)} anyway?`)) return
+    }
+    run(async () => {
+      const proof_path = shot ? await api.uploadFile('proof', await compressImage(shot.file)) : null
+      await api.insert('payments', { order_id: o.id, kind: pay.kind, method: pay.method, amount: amt, reference: pay.reference.trim() || null, proof_path,
+        status: pay.kind === 'refund' ? 'pending' : 'verified', note: `Recorded by baker${shot ? ' · screenshot from customer' : ''}` })
+      if (pay.kind !== 'refund' && confirmToo && canConfirm) {
+        if (!o.confirmed_date) await api.update('orders', o.id, { confirmed_date: o.requested_date, confirmed_slot_label: o.slot_label })
+        await api.setStatus(o.id, 'confirmed', 'Payment received — confirmed by baker')
+      }
+      setShot(null)
+    }, pay.kind === 'refund' ? 'Refund marked pending — verify once sent' : confirmToo && canConfirm ? 'Payment recorded & order confirmed' : 'Payment recorded', pay.kind === 'refund' ? null : confirmToo && canConfirm ? 'confirmed' : 'payment_received')
+  }
+  const saveEdit = (p) => {
+    const amt = +edit.amount
+    if (!(amt > 0)) return
+    const changes = [p.amount !== amt && `${inr(p.amount)} → ${inr(amt)}`, p.kind !== edit.kind && `${KIND_LABEL[p.kind]} → ${KIND_LABEL[edit.kind]}`, p.method !== edit.method && `${p.method} → ${edit.method}`].filter(Boolean)
+    run(async () => {
+      await api.update('payments', p.id, { kind: edit.kind, method: edit.method, amount: amt, reference: edit.reference.trim() || null,
+        note: `${p.note ? p.note + ' · ' : ''}Edited ${stamp()}${changes.length ? ': ' + changes.join(', ') : ''}` })
+      setEdit(null)
+    }, 'Payment updated')
+  }
+  const removeP = (p) => {
+    if (!confirm(`Remove this ${inr(p.amount)} payment? Use this for a duplicate or a mistake. It stays in the history (crossed out) and the paid amount is corrected.`)) return
+    run(() => api.update('payments', p.id, { status: 'rejected', note: `${p.note ? p.note + ' · ' : ''}Removed by baker ${stamp()} (duplicate / mistake)` }), 'Payment removed — paid amount corrected')
+  }
+  const restore = (p) => run(() => api.update('payments', p.id, { status: 'verified', note: `${p.note ? p.note + ' · ' : ''}Restored ${stamp()}` }), 'Payment restored')
+
+  return (
+    <div className="card flat stack">
+      <div className="row between wrap" style={{ gap: 6 }}><b>Payments</b><span className="small">Paid <b>{inr(o.amount_paid)}</b> of {inr(o.total)} · {due ? <>balance <b>{inr(due)}</b></> : 'fully paid ✓'}</span></div>
+      {over > 0 && <div className="notice warn small"><b>Paid {inr(over)} more than the order total.</b> If a payment was recorded twice, tap <b>Remove</b> on the extra one below — or <b>Edit</b> it to the right amount.</div>}
+      {payments.map((p) => {
+        const removed = p.status === 'rejected'
+        if (edit?.id === p.id) return (
+          <div className="card stack" key={p.id} style={{ gap: 8, background: 'var(--ivory)' }}>
+            <b className="small">Edit payment</b>
+            <div className="grid-2">
+              <Field label="Type"><select className="input" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value })}>{Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+              <Field label="Method"><select className="input" value={edit.method} onChange={(e) => setEdit({ ...edit, method: e.target.value })}>{METHODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+              <Field label="Amount ₹"><input className="input" inputMode="numeric" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value.replace(/\D/g, '') })} /></Field>
+              <Field label="Reference / UTR"><input className="input" value={edit.reference} onChange={(e) => setEdit({ ...edit, reference: e.target.value })} /></Field>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btn-primary btn-sm" disabled={busy || !(+edit.amount > 0)} onClick={() => saveEdit(p)}>Save</button>
+              <button className="btn btn-white btn-sm" onClick={() => setEdit(null)}>Cancel</button>
+            </div>
+          </div>
+        )
+        return (
+          <div className="list-row" key={p.id} style={{ alignItems: 'flex-start', opacity: removed ? 0.55 : 1 }}>
+            <div className="grow small">
+              <b style={{ textDecoration: removed ? 'line-through' : 'none' }}>{KIND_LABEL[p.kind] || p.kind} · {inr(p.amount)}</b>{' '}
+              <Badge tone={p.status === 'verified' ? 'mint' : p.status === 'pending' ? 'peach' : 'grey'}>{removed ? 'removed' : p.status === 'pending' ? (p.kind === 'refund' ? 'to send' : 'to check') : p.status}</Badge>
+              <div className="tiny muted">{(METHODS.find((m) => m[0] === p.method) || [0, p.method])[1]}{p.reference ? ` · ref ${p.reference}` : ''} · {fmtDateTime(p.created_at)}{p.note ? ` · ${p.note}` : ''}</div>
+              {p.proof_path && <div className="upload-prev" style={{ marginTop: 6 }}><SignedImg path={p.proof_path} label="Payment screenshot" /></div>}
+            </div>
+            <div className="row wrap" style={{ gap: 4, justifyContent: 'flex-end' }}>
+              {p.status === 'pending' && <>
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => run(() => api.update('payments', p.id, { status: 'verified' }), p.kind === 'refund' ? 'Refund recorded' : 'Payment verified', p.kind === 'refund' ? 'refunded' : 'payment_received')}>{p.kind === 'refund' ? 'Mark refunded' : 'Verify'}</button>
+                <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => run(() => api.update('payments', p.id, { status: 'rejected' }), 'Marked as not received')}>Not received</button>
+              </>}
+              {p.status === 'verified' && <>
+                <button className="btn btn-white btn-sm" disabled={busy} onClick={() => setEdit({ id: p.id, kind: p.kind, method: p.method, amount: String(p.amount), reference: p.reference || '' })}>Edit</button>
+                <button className="btn btn-white btn-sm" disabled={busy} onClick={() => removeP(p)}>Remove</button>
+              </>}
+              {removed && /Removed by baker/.test(p.note || '') && <button className="link-btn tiny" disabled={busy} onClick={() => restore(p)}>Undo</button>}
+            </div>
+          </div>
+        )
+      })}
+      {waiting.length > 0 && <div className="notice info small">The customer’s screenshot is above — check the amount in your UPI app, then tap <b>Verify</b>. No need to record it again.</div>}
+
+      <div className="stack" style={{ gap: 8, borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+        <b className="small">Record a payment yourself</b>
+        <div className="grid-2">
+          <Field label="Type"><select className="input" value={pay.kind} onChange={(e) => setPay({ ...pay, kind: e.target.value })}>{Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+          <Field label="Method"><select className="input" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}>{METHODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+          <Field label="Amount ₹" hint={pay.kind === 'refund' ? undefined : due ? `left to pay: ${inr(due)}` : 'nothing left to pay'}><input className="input" inputMode="numeric" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value.replace(/\D/g, '') })} /></Field>
+          <Field label="Reference / UTR" hint="optional"><input className="input" value={pay.reference} onChange={(e) => setPay({ ...pay, reference: e.target.value })} /></Field>
+        </div>
+        {pay.kind !== 'refund' && (
+          <div className="row wrap" style={{ gap: 10, alignItems: 'center' }}>
+            <label className="btn btn-white btn-sm"><Icon name="upload" size={16} /> {shot ? 'Change screenshot' : 'Add customer’s UPI screenshot'}
+              <input type="file" accept={ACCEPT_IMG} hidden onChange={(e) => { const file = e.target.files?.[0]; if (file) setShot({ file, url: URL.createObjectURL(file) }) }} />
+            </label>
+            {shot && <span className="upload-prev"><span className="u"><img src={shot.url} alt="Payment screenshot" /></span></span>}
+            {shot && <button className="link-btn tiny" onClick={() => setShot(null)}>remove</button>}
+          </div>
+        )}
+        {pay.kind !== 'refund' && canConfirm && <label className="check small"><input type="checkbox" checked={confirmToo} onChange={(e) => setConfirmToo(e.target.checked)} /> Also confirm the order</label>}
+        <button className="btn btn-soft btn-sm" disabled={busy || !(+pay.amount > 0)} onClick={record}>{pay.kind === 'refund' ? 'Record refund' : confirmToo && canConfirm ? 'Record payment & confirm order' : 'Record payment received'}</button>
+      </div>
+    </div>
+  )
+}
+
 export function OrderDrawer({ id, onClose }) {
   const { db, reload, settings: s, toast } = useAdmin()
   const o = db.orders.find((x) => x.id === id)
@@ -39,12 +161,13 @@ export function OrderDrawer({ id, onClose }) {
   const [manual, setManual] = useState('')
   const [sched, setSched] = useState(() => ({ date: o?.confirmed_date || o?.requested_date || '', slot: o?.confirmed_slot_label || o?.slot_label || '' }))
   const [price, setPrice] = useState(() => ({ delivery_charge: o?.delivery_charge || 0, discount: o?.discount || 0, subtotal: o?.subtotal || 0, quote_note: o?.quote_note || '', reason: '' }))
-  const [pay, setPay] = useState({ kind: 'advance', method: 'upi', amount: '', reference: '' })
   const [notes, setNotes] = useState(o?.admin_notes || '')
   // WhatsApp follow-up suggestion — a brand-new order first offers the "Order placed, awaiting confirmation" message
   const [prompt, setPrompt] = useState(() => (o && ['submitted', 'awaiting_payment', 'payment_verification'].includes(o.status)
     && !db.notification_log.some((n) => n.order_id === o.id && /^received-/.test(n.template)) ? 'received' : null))
   const [cancelling, setCancelling] = useState(false)
+  // opening an order stops the repeat phone alerts for it
+  useEffect(() => { if (o && !o.admin_seen_at) api.update('orders', o.id, { admin_seen_at: new Date().toISOString() }).catch(() => {}) }, [o?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!o) return null
   const payments = db.payments.filter((p) => p.order_id === o.id)
   const history = db.order_status_history.filter((h) => h.order_id === o.id).sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -116,7 +239,8 @@ export function OrderDrawer({ id, onClose }) {
                   <div className="tiny muted">{itemSummary(i)}</div>
                   {[['Message', i.message], ['Name', i.name_on_cake], ['Age', i.age], ['Colours', i.colours], ['Theme', i.theme], ['Instructions', i.instructions], ['Custom design', i.custom_description]].filter(([, v]) => v).map(([k2, v]) => <div className="tiny" key={k2}><b>{k2}:</b> {v}</div>)}
                   {i.addons?.length > 0 && <div className="tiny">+ {i.addons.map((a) => `${a.name} (${inr(a.price)})`).join(', ')}</div>}
-                  {i.reference_images?.length > 0 && <div className="upload-prev" style={{ marginTop: 6 }}>{i.reference_images.map((p) => <SignedImg key={p.slice(-50)} path={p} label="Reference" />)}</div>}
+                  {i.reference_images?.some((p) => !isAudioPath(p)) && <div className="upload-prev" style={{ marginTop: 6 }}>{i.reference_images.filter((p) => !isAudioPath(p)).map((p) => <SignedFile key={p.slice(-50)} path={p} label="Reference" />)}</div>}
+                  {i.reference_images?.filter(isAudioPath).map((p) => <div key={p.slice(-50)} style={{ marginTop: 6 }}><SignedFile path={p} label="Customer’s voice note" /></div>)}
                 </div>
               </div>
             ))}
@@ -228,35 +352,7 @@ export function OrderDrawer({ id, onClose }) {
             }}>Save price</button>
           </div>
 
-          <div className="card flat stack">
-            <div className="row between"><b>Payments</b><span className="small">Paid {inr(o.amount_paid)} of {inr(o.total)} · advance {inr(o.advance_due)}</span></div>
-            {payments.map((p) => (
-              <div className="list-row" key={p.id} style={{ alignItems: 'flex-start' }}>
-                <div className="grow small">
-                  <b>{p.kind === 'refund' ? 'Refund' : p.kind} · {inr(p.amount)}</b> <Badge tone={p.status === 'verified' ? 'mint' : p.status === 'pending' ? 'peach' : 'grey'}>{p.status}</Badge>
-                  <div className="tiny muted">{p.method}{p.reference ? ` · ref ${p.reference}` : ''} · {fmtDateTime(p.created_at)}{p.note ? ` · ${p.note}` : ''}</div>
-                  {p.proof_path && <div className="upload-prev" style={{ marginTop: 6 }}><SignedImg path={p.proof_path} label="Payment proof" /></div>}
-                </div>
-                {p.status === 'pending' && (
-                  <div className="row" style={{ gap: 4 }}>
-                    <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => run(() => api.update('payments', p.id, { status: 'verified' }), p.kind === 'refund' ? 'Refund recorded' : 'Payment verified', p.kind === 'refund' ? 'refunded' : 'payment_received')}>{p.kind === 'refund' ? 'Mark refunded' : 'Verify'}</button>
-                    <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => run(() => api.update('payments', p.id, { status: 'rejected' }), 'Marked as not received')}>Reject</button>
-                  </div>
-                )}
-              </div>
-            ))}
-            <div className="tiny muted">Check your bank / UPI app for the amount & UTR before verifying.</div>
-            <div className="grid-2">
-              <Field label="Type"><select className="input" value={pay.kind} onChange={(e) => setPay({ ...pay, kind: e.target.value })}><option value="advance">Advance</option><option value="balance">Balance</option><option value="refund">Refund</option></select></Field>
-              <Field label="Method"><select className="input" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}><option value="upi">UPI</option><option value="cash">Cash</option><option value="bank">Bank transfer</option><option value="gateway">Gateway</option><option value="other">Other</option></select></Field>
-              <Field label="Amount ₹"><input type="number" className="input" value={pay.amount} placeholder={String(Math.max(o.advance_due - o.amount_paid, 0) || o.total - o.amount_paid)} onChange={(e) => setPay({ ...pay, amount: e.target.value })} /></Field>
-              <Field label="Reference / UTR"><input className="input" value={pay.reference} onChange={(e) => setPay({ ...pay, reference: e.target.value })} /></Field>
-            </div>
-            <button className="btn btn-soft btn-sm" disabled={busy || !(+pay.amount > 0)} onClick={() => run(async () => {
-              await api.insert('payments', { order_id: o.id, kind: pay.kind, method: pay.method, amount: +pay.amount, reference: pay.reference || null, status: pay.kind === 'refund' ? 'pending' : 'verified', note: 'Recorded by baker' })
-              setPay({ kind: 'balance', method: 'cash', amount: '', reference: '' })
-            }, pay.kind === 'refund' ? 'Refund marked pending — verify once sent' : 'Payment recorded', pay.kind === 'refund' ? null : 'payment_received')}>{pay.kind === 'refund' ? 'Record refund' : 'Record payment received'}</button>
-          </div>
+          <PaymentsCard o={o} payments={payments} busy={busy} run={run} />
 
           <div className="card flat stack">
             <b>Message the customer</b>
@@ -294,6 +390,7 @@ export default function Orders({ preset }) {
   const [scope, setScope] = useState('all')
   const [tab, setTab] = useState(sp.get('tab') || 'active')
   const [q, setQ] = useState('')
+  const [adding, setAdding] = useState(sp.get('new') === '1')
   const [range, setRange] = useState({ from: todayISO(), to: addDaysISO(todayISO(), 30) })
   const openId = sp.get('open')
   const today = todayISO(s.timezone)
@@ -322,8 +419,10 @@ export default function Orders({ preset }) {
   return (
     <>
       <PageHead title={preset === 'approvals' ? 'Custom design & delivery approvals' : 'Orders'} sub={`${rows.length} order${rows.length === 1 ? '' : 's'}`}>
+        {preset !== 'approvals' && <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> New order</button>}
         <button className="btn btn-soft btn-sm" onClick={exportCsv}><Icon name="download" size={16} /> CSV</button>
       </PageHead>
+      {adding && <NewOrder onClose={() => setAdding(false)} onOpen={(id) => { setAdding(false); setSp({ open: id }) }} />}
       {preset !== 'approvals' && <div className="pill-tabs">{STATUS_TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>}
       <div className="toolbar">
         <input className="input" placeholder="Search name, mobile, order…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 220 }} />
